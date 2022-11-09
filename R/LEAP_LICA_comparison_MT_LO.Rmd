@@ -1,0 +1,438 @@
+---
+title: "LEAP_LICA_comparisons"
+author: "NF"
+date: "September 29, 2022"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(patchwork)
+library(magrittr)
+library(wiqid)
+library(tidyverse)
+library(cowplot)
+library(ggnewscale)
+library(readxl)
+library(jmuOutlier)
+library(Cairo)
+library(oro.nifti)
+
+LICA <- "VBM_DWI_congrads"                     ######### Always check this #############
+
+outdir <- paste0("/project/3022035.03/LEAP_long/stats/LICA_comparison") 
+
+```
+
+```{r}
+behaviour <- read_xlsx("/project/3022035.03/LEAP/clinical/LEAP_t1_t2_Core clinical variables_03-09-19-withlabels.xlsx")
+
+behaviour[behaviour == 999] <- NA
+behaviour[behaviour == 777] <- NA
+
+beh1 <- behaviour %>% dplyr::select("subjects", starts_with("t1_"))
+
+colnames(beh1) <- sub("t1_","",colnames(beh1))
+beh1$timepoint <- "t1"
+
+beh2 <- behaviour %>% dplyr::select("subjects", starts_with("t2_"))
+
+colnames(beh2) <- sub("t2_","",colnames(beh2))
+beh2$timepoint <- "t2"
+
+
+beh1 <- beh1[,c("subjects","diagnosis", "sex", "site", "ageyrs", "fsiq",
+                "rrb_css_all", "sa_css_all", "css_total_all",  #### not using imputed data as not avail for t2
+                "srs_tscore_combined", "ssp_total", "rbs_total", 
+                "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint")]
+
+beh2 <- beh2[,c("subjects", "sex", "site", "ageyrs",
+                "rrb_css", "sa_css", "css_total", 
+               "srs_tscore_combined", "ssp_total", "rbs_total", 
+               "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint")]
+
+selected_columns <- beh1[,c('subjects','fsiq','diagnosis')]
+
+beh2 <- merge(beh2, selected_columns, by.x = "subjects", all=TRUE) 
+
+### Timepoint 2 clinical core date does NOT contain the following: `adi_rrb_total`, `adi_communication_total`, `adi_social_total` # thus excluded 
+
+subs1 <- read.table("/project/3022035.03/LEAP/clinical/final_overlapping_subs.txt", colClasses = "numeric")  %>% unlist() %>% unname() ######### Always check this #############
+
+subs2 <- read.table("/project/3022035.03/LEAP2/data/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+
+beh1 <- filter(beh1, subjects %in% subs1)
+colnames(beh1) <- sub("_all", "", colnames(beh1))
+beh2 <- filter(beh2, subjects %in% subs2)
+
+behaviour <- rbind(beh1, beh2)
+
+subs <- c(subs1, subs2)
+```
+
+```{r}
+NFcourse <- as.data.frame(t(read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/",LICA, "/subjectCoursesOut.txt"))))
+
+colnames(NFcourse) <- sub("V", "NF_", colnames(NFcourse)) 
+NFcourse <- scale(NFcourse, center = T, scale = T) %>% as.data.frame()
+NFcourse <- cbind(subs, NFcourse)
+
+NFcourse$timepoint <- behaviour$timepoint
+
+NFcourse_t1 <- NFcourse %>% filter(timepoint =="t1")
+
+NFcourseStr <- as.data.frame(t(read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/VBM_DWI/subjectCoursesOut.txt"))))
+
+colnames(NFcourseStr) <- sub("V", "NFstr_", colnames(NFcourseStr)) 
+NFcourseStr <- scale(NFcourseStr, center = T, scale = T) %>% as.data.frame()
+NFcourseStr <- cbind(subs, NFcourseStr)
+
+NFcourseStr$timepoint <- behaviour$timepoint
+
+NFcourseStr_t1 <- NFcourseStr %>% filter(timepoint =="t1")
+
+
+TMcourse_VBM <- as.data.frame(read.table("/project/3022035.03/Ting_ICA_LICA/ICA_VBM/melodic_mix"))
+colnames(TMcourse_VBM) <- sub("V", "TM", colnames(TMcourse_VBM)) 
+TMcourse_VBM <- scale(TMcourse_VBM, center = T, scale = T) %>% as.data.frame()
+TMsubs_VBM <- read.table("/project/3022035.03/Ting_ICA_LICA/ICA_VBM/ICA_VBM_sublist.txt")
+TMcourse_VBM <- cbind(TMcourse_VBM, TMsubs_VBM)
+
+course_matched <-merge(NFcourse_t1, NFcourseStr_t1, by = "subs") %>% merge(TMcourse_VBM, by.x = "subs", by.y = "V1")
+```
+
+```{r comparison with ICA}
+#corTM10vNFstr <- cor(course_matched$TM14, select(course_matched, starts_with("NFstr")), method= "spearman") %>% t() %>% as.data.frame()
+#corTM14vNFstr %>% arrange(abs(V1)) %>% tail()
+
+
+corTM10vNF62 <- cor(course_matched$TM10, course_matched$NF_62, method = "spearman")
+corTM14vNF62 <- cor(course_matched$TM14, course_matched$NF_62, method = "spearman")
+corTM10vNFstr <- cor(course_matched$TM10, select(course_matched, starts_with("NFstr")), method= "spearman") %>% t() %>% as.data.frame()
+corTM10vNFstr %>% arrange(abs(V1)) %>% tail()
+corTM14vNFstr <- cor(course_matched$TM14, select(course_matched, starts_with("NFstr")), method= "spearman") %>% t() %>% as.data.frame()
+corTM14vNFstr %>% arrange(abs(V1)) %>% tail()
+corTM10vNFstr42 <- cor(course_matched$TM10, course_matched$NFstr_42, method = "spearman")
+
+perm.cor.test(course_matched$NF_62, course_matched$TM10, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000)
+
+perm.cor.test(course_matched$NF_62, course_matched$TM14, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000)
+
+permTM10vNFstr42 <- perm.cor.test(course_matched$NFstr_42, course_matched$TM10, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000) %>% .$p.value
+
+fig_TM10vNF62 <- course_matched %>%
+  ggplot( aes(x=NF_62, y=TM10)) +
+    geom_point(color= "grey", alpha = 0.7, size = 1) + xlab("IC62") +
+    ylab("Mei et al (2020) IC10") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =8),
+      axis.ticks = element_blank(), axis.text = element_text(size = 8), 
+      axis.title = element_text(size=8, face="bold")) + 
+  annotate(geom="text", x=-3.5, y=4, size=2, label = paste0("rho = ", round(corTM10vNF62,2)), parse =FALSE)
+
+fig_TM10vNF62_f <- file.path(outdir, "TM10vNF62.png")
+#ggsave(fig_AL6vNF9_f, fig_AL6vNF9, dpi=300, width=7, height = 7, units = "cm", type="cairo-png")
+
+Cairo(width=7, height = 7, units = "cm", dpi=300, file=fig_TM10vNF62_f, type="png", bg="white")
+fig_TM10vNF62
+dev.off() 
+
+
+fig_TM14vNF62 <- course_matched %>%
+  ggplot( aes(x=NF_62, y=TM14)) +
+    geom_point(color= "grey", alpha = 0.7, size = 1) + xlab("IC62") +
+    ylab("Mei et al (2020) IC14") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =8),
+      axis.ticks = element_blank(), axis.text = element_text(size = 8), 
+      axis.title = element_text(size=8, face="bold")) + 
+  annotate(geom="text", x=-3.5, y=4, size=2, label = paste0("rho = ", round(corTM14vNF62,2)), parse =FALSE)
+
+fig_TM14vNF62_f <- file.path(outdir, "TM14vNF62.png")
+#ggsave(fig_AL6vNF9_f, fig_AL6vNF9, dpi=300, width=7, height = 7, units = "cm", type="cairo-png")
+
+Cairo(width=7, height = 7, units = "cm", dpi=300, file=fig_TM14vNF62_f, type="png", bg="white")
+fig_TM14vNF62
+dev.off() 
+
+
+fig_TM10vNFstr42 <- course_matched %>%
+  ggplot( aes(x=NFstr_42, y=TM10)) +
+    geom_point(color= "grey", alpha = 0.7, size = 1) + xlab("Structural IC42") +
+    ylab("Mei et al (2020) IC10") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =8),
+      axis.ticks = element_blank(), axis.text = element_text(size = 8), 
+      axis.title = element_text(size=8, face="bold")) + 
+  annotate(geom="text", x=-3.5, y=4, size=2, label = paste0("rho = ", round(corTM10vNFstr42,2)), parse =FALSE)+ 
+  annotate(geom="text", x=-3.35, y=3.5, size=2, label = paste0("italic(p)[perm] < 0.001"), parse =TRUE)
+
+fig_TM10vNFstr42_f <- file.path(outdir, "TM10vNFstr42.png")
+#ggsave(fig_AL6vNF9_f, fig_AL6vNF9, dpi=300, width=7, height = 7, units = "cm", type="cairo-png")
+
+Cairo(width=7, height = 7, units = "cm", dpi=300, file=fig_TM10vNFstr42_f, type="png", bg="white")
+fig_TM10vNFstr42
+dev.off() 
+```
+
+```{r comparison with LICA}
+TMcourse_LICA <- as.data.frame(read.table("/project/3022035.03/Ting_ICA_LICA/linkedICA_VBM_DTI/subjectCoursesOut.txt"))
+colnames(TMcourse_LICA) <- sub("V", "TM", colnames(TMcourse_LICA)) 
+TMcourse_LICA <- scale(TMcourse_LICA, center = T, scale = T) %>% as.data.frame()
+TMsubs_LICA <- read.table("/project/3022035.03/Ting_ICA_LICA/linkedICA_VBM_DTI/linkedICA_VBM_DTI_sublist.txt")
+TMcourse_LICA <- cbind(TMcourse_LICA, TMsubs_LICA)
+
+course_matched_LICA <-merge(NFcourse_t1, NFcourseStr_t1, by="subs") %>% merge(TMcourse_LICA, by.x = "subs", by.y = "V1")
+
+corTM58vNF <- cor(course_matched_LICA$TM58, select(course_matched_LICA, starts_with("NF_")), method = "spearman") %>% t() %>% as.data.frame()
+corTM58vNF %>% arrange(abs(V1)) %>% tail()
+
+corTM58vNFstr <- cor(course_matched_LICA$TM58, select(course_matched_LICA, starts_with("NFstr_")), method = "spearman") %>% t() %>% as.data.frame()
+corTM58vNFstr %>% arrange(abs(V1)) %>% tail()
+corTM58vNFstr42 <- cor(course_matched_LICA$TM58, course_matched_LICA$NFstr_42, method = "spearman")
+
+perm.cor.test(course_matched_LICA$NF_62, course_matched_LICA$TM58, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000)
+
+permTM58vNFstr42 <- perm.cor.test(course_matched_LICA$NFstr_42, course_matched_LICA$TM58, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000) %>% .$p.value
+
+fig_TM58vNFstr42 <- course_matched_LICA %>%
+  ggplot( aes(x=NFstr_42, y=TM58)) +
+    geom_point(color= "grey", alpha = 0.7, size = 1) + xlab("Structural IC42") +
+    ylab("Mei et al (2022) IC58") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =8),
+      axis.ticks = element_blank(), axis.text = element_text(size = 8), 
+      axis.title = element_text(size=8, face="bold")) + 
+  annotate(geom="text", x=-3.5, y=4, size=2, label = paste0("rho = ", round(corTM58vNFstr42,2)), parse =FALSE) + 
+  annotate(geom="text", x=-3.4, y=3.5, size=2, label = paste0("italic(p)[perm] == ", round(permTM58vNFstr42,3)), parse =TRUE)
+
+fig_TM58vNFstr42_f <- file.path(outdir, "TM58vNFstr42.png")
+#ggsave(fig_AL6vNF9_f, fig_AL6vNF9, dpi=300, width=7, height = 7, units = "cm", type="cairo-png")
+
+Cairo(width=7, height = 7, units = "cm", dpi=300, file=fig_TM58vNFstr42_f, type="png", bg="white")
+fig_TM58vNFstr42
+dev.off() 
+
+
+```
+
+```{r comparison between func only comps and IC62 from main analysis}
+
+#set up 
+MMcourse <- as.data.frame(t(read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/",LICA, "/subjectCoursesOut.txt"))))
+
+colnames(MMcourse) <- sub("V", "MM_", colnames(MMcourse)) 
+MMcourse <- scale(MMcourse, center = T, scale = T) %>% as.data.frame()
+MMcourse <- cbind(subs, MMcourse)
+
+MMcourseStr <- as.data.frame(t(read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/subjectCoursesOut.txt"))))
+
+colnames(MMcourseStr) <- sub("V", "MMstr_", colnames(MMcourseStr)) 
+MMcourseStr <- scale(MMcourseStr, center = T, scale = T) %>% as.data.frame()
+MMcourseStr <- cbind(subs, MMcourseStr)
+
+func_course <- as.data.frame(t(read.table("/project/3022035.03/LEAP_long/data/flica_output/congrads/subjectCoursesOut.txt")))
+colnames(func_course) <- sub("V", "congrads_", colnames(func_course)) 
+func_course <- scale(func_course, center = T, scale = T) %>% as.data.frame()
+func_course <- cbind(func_course, subs)
+
+course_matched_MMxFunc <-merge(MMcourse, func_course, by = "subs")
+
+#calculate correlations
+
+corcongrads20vMM62 <- cor(course_matched_MMxFunc$congrads_20, course_matched_MMxFunc$MM_62, method = "spearman")
+corcongrads55vMM62 <- cor(course_matched_MMxFunc$congrads_55, course_matched_MMxFunc$MM_62, method = "spearman")
+corcongrads20vMMstr <- cor(course_matched_MMxFunc$congrads_20, select(course_matched_MMxFunc, starts_with("MM")), method= "spearman") %>% t() %>% as.data.frame()
+corcongrads20vMMstr %>% arrange(abs(V1)) %>% tail()
+corcongrads55vMMstr <- cor(course_matched_MMxFunc$congrads_55, select(course_matched_MMxFunc, starts_with("MM")), method= "spearman") %>% t() %>% as.data.frame()
+corcongrads55vMMstr %>% arrange(abs(V1)) %>% tail()
+corcongrads20vMM3 <- cor(course_matched_MMxFunc$congrads_20, course_matched_MMxFunc$MM_3, method = "spearman")
+
+permMM62vcongrads55 <- perm.cor.test(course_matched_MMxFunc$MM_62, course_matched_MMxFunc$congrads_55, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000)
+
+permMM3vcongrads20 <- perm.cor.test(course_matched_MMxFunc$MM_3, course_matched_MMxFunc$congrads_20, alternative = c("two.sided"), 
+              method = c("spearman"), num.sim = 10000)
+
+#scatter plots
+fig_congrads55vMM62 <- course_matched_MMxFunc %>%
+  ggplot( aes(x=MM_62, y=congrads_55)) +
+    geom_point(color= "grey", alpha = 0.7, size = 1) + xlab("Main Analysis IC62") +
+    ylab("Congrads Only IC55") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =8),
+      axis.ticks = element_blank(), axis.text = element_text(size = 8), 
+      axis.title = element_text(size=8, face="bold")) + 
+  annotate(geom="text", x=-3.5, y=4, size=2, label = paste0("rho = ", round(corcongrads55vMM62,2)), parse =FALSE)
+
+fig_congrads55vMM62_f <- file.path(outdir, "congrads55vMM62.png")
+
+Cairo(width=7, height = 7, units = "cm", dpi=300, file=fig_congrads55vMM62_f, type="png", bg="white")
+fig_congrads55vMM62
+dev.off() 
+
+fig_congrads20vMM3 <- course_matched_MMxFunc %>%
+  ggplot( aes(x=MM_3, y=congrads_20)) +
+    geom_point(color= "grey", alpha = 0.7, size = 1) + xlab("Main Analysis IC3") +
+    ylab("Congrads Only IC20") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =8),
+      axis.ticks = element_blank(), axis.text = element_text(size = 8), 
+      axis.title = element_text(size=8, face="bold")) + 
+  annotate(geom="text", x=-3.5, y=4, size=2, label = paste0("rho = ", round(corcongrads20vMM3,2)), parse =FALSE)
+
+fig_congrads20vMM3_f <- file.path(outdir, "congrads20vMM3.png")
+
+Cairo(width=7, height = 7, units = "cm", dpi=300, file=fig_congrads20vMM3_f, type="png", bg="white")
+fig_congrads20vMM3
+dev.off() 
+
+
+
+```
+
+```{r}
+#fig combined IC42 v ICA and LICA results
+
+figs <- plot_grid(fig_TM10vNFstr42, fig_TM58vNFstr42, ncol=2, align='hv', labels = "AUTO", label_size = 8)
+
+figs_f <- file.path(outdir, "NFstr42vsICA10_LICA58.png")
+
+Cairo(width=14, height = 7, units = "cm", dpi=300, file=figs_f, type="png", bg="white")
+figs
+dev.off() 
+
+```
+
+```{r}
+fig_TM58vNFstr42_adj <- course_matched_LICA %>%
+  ggplot( aes(x=NFstr_42, y=TM58)) +
+    geom_point(color= "grey", alpha = 0.5, size = 0.5) + xlab("Subject course structural IC42") +
+    ylab("Subject course Mei (2022) IC58") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =5),
+      axis.ticks = element_blank(), axis.text = element_text(size = 5), 
+      axis.title = element_text(size=5, face="bold")) + 
+  annotate(geom="text", x=-2.9, y=4, size=1.4, label = paste0("rho = ", round(corTM58vNFstr42,2)), parse =FALSE) + 
+  annotate(geom="text", x=-2.7, y=3.4, size=1.4, label = paste0("italic(p)[perm] == ", round(permTM58vNFstr42,3)), parse =TRUE)+
+    coord_fixed()
+
+fig_TM10vNFstr42_adj <- course_matched %>%
+  ggplot( aes(x=NFstr_42, y=TM10)) +
+    geom_point(color= "grey", alpha = 0.5, size = 0.5) + xlab("Subject course structural IC42") +
+    ylab("Subject course Mei (2020) IC10") + xlim(-4,4) + ylim(-4,4) +
+  stat_smooth(method="lm", se=TRUE, color= "black", size=0.5) +
+  theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =5),
+      axis.ticks = element_blank(), axis.text = element_text(size = 5), 
+      axis.title = element_text(size=5, face="bold")) + 
+  annotate(geom="text", x=-2.9, y=4, size=1.4, label = paste0("rho = ", round(corTM10vNFstr42,2)), parse =FALSE)+ 
+  annotate(geom="text", x=-2.7, y=3.4, size=1.4, label = paste0("italic(p)[perm] < 0.001"), parse =TRUE)+
+    coord_fixed()
+```
+
+```{r spatial maps}
+sSAG <- 90 # mid-saggital slice to show axial slice position on
+
+sAX1 <- 55
+sAX2 <- 72
+sAX3 <- 89
+sAX4 <- 106
+sAX5 <- 123
+
+thr <- 2.0
+source("/project/3022035.03/congratICA/R/LICA_figures.R")
+
+fMNI <- paste0("/project/3022035.03/Ting_ICA_LICA/MNI152_T1_1mm_brain.nii.gz")
+fMNImask <- paste0("/project/3022035.03/Ting_ICA_LICA/MNI152_T1_1mm_brain_mask.nii.gz")
+
+MNI <- readNIfTI(fMNI)
+mask <- readNIfTI(fMNImask)
+mask[mask ==0] <- NA
+MNI <- MNI*mask       #skip this if you don't want to remove background
+
+#sag 
+sag <- as.data.frame(MNI@.Data[sSAG, , ])
+sag$y <- paste0("y_", 1:nrow(sag))
+sag_gath <- sag %>% gather("x", "value", -y)
+sag_gath <- sag_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(sag)-1)))) %>%
+                        mutate(y = fct_relevel(y, paste0("y_", 1:nrow(sag))))
+sag_gath$value_scaled <- (sag_gath$value - min(sag_gath$value, na.rm =TRUE))/diff(range(sag_gath$value, na.rm =TRUE))
+
+```
+
+```{r load VBM from diff studies}
+fVBM_IC42 <- "/project/3022035.03/LEAP_long/data/flica_output/VBM_DWI/VBM/Renormalized_all_VBM_1mm_IC42.nii.gz"
+VBM_IC42 <- readNIfTI(fVBM_IC42)
+
+fVBM_IC10 <- "/project/3022035.03/Ting_ICA_LICA/ICA_VBM/VBM/Renormalized_all_VBM_1mm_IC10.nii.gz"
+VBM_IC10 <- readNIfTI(fVBM_IC10)
+
+fVBM_IC58 <- "/project/3022035.03/Ting_ICA_LICA/linkedICA_VBM_DTI/VBM/Renormalized_all_VBM_1mm_IC58.nii.gz"
+VBM_IC58 <- readNIfTI(fVBM_IC58)
+```
+
+
+```{r}
+#sag slice with axial locations  
+  sag_slice <- sag_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(sag)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(sag)))) %>%
+    ggplot(aes(x=y, y=x, fill = value)) +
+    geom_raster() + scale_fill_gradient(low="black", high="white", na.value = "white") +
+    theme(axis.text = element_blank(), axis.title = element_blank(), axis.ticks = element_blank(),
+          legend.position = "none", panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), panel.background = element_blank())
+  
+  fig_slice_loc <- sag_slice + geom_hline(aes(yintercept=sAX1, colour= "red")) +
+    geom_hline(aes(yintercept=sAX2, colour= "red")) + 
+    geom_hline(aes(yintercept=sAX3, colour= "red")) +
+    geom_hline(aes(yintercept=sAX4, colour= "red")) +
+    geom_hline(aes(yintercept=sAX5, colour= "red")) +
+    theme(plot.margin = margin(0, 10, 0, 0)) +
+    coord_fixed()
+
+  
+  labels <- c("A: Structural IC42", "B: Mei et al (2020) IC10", "C: Mei et al (2022) IC58")
+  
+    fig_vbm42 <- mk_ax_fig(VBM_IC42, sAX1, sAX2, sAX3, sAX4, sAX5)
+    fig_vbm10 <- mk_ax_fig(VBM_IC10, sAX1, sAX2, sAX3, sAX4, sAX5)
+    fig_vbm58 <- mk_ax_fig(VBM_IC58, sAX1, sAX2, sAX3, sAX4, sAX5)
+    fig_wleg <- mk_fig_leg(sAX1, VBM_IC42)
+    leg <- get_legend((fig_wleg))
+    
+    p_spatial <- plot_grid(fig_vbm42,fig_vbm10,fig_vbm58, ncol=1, 
+                    align="hv", axis="rl", labels = labels,
+                    label_size = 7, label_x =0, hjust = 0)
+    
+    p_legend  <- plot_grid(leg, fig_slice_loc, ncol =2, scale=c(0.8,1), rel_widths = c(0.3,1))
+    
+    p_scatter <- plot_grid(fig_TM10vNFstr42_adj, fig_TM58vNFstr42_adj, ncol=1, 
+                   align= 'v', labels = c( "D", "E"),
+                    label_size = 7, label_x =0, hjust = 0)
+    
+    p_right <- plot_grid(p_legend, p_scatter, ncol=1, rel_heights = c(1,2))
+    
+    p <- plot_grid(p_spatial, p_right, ncol=2, scale= c(1,1), rel_widths = c(1,0.4))
+    
+    p_file <- file.path(outdir, paste0("VBMmaps_cross_study.png"))
+    
+Cairo(width=14, height = 10, units = "cm", dpi=300, file=p_file, type="png", bg="white")
+p
+dev.off() 
+   
+```
+
+
+

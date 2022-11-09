@@ -1,0 +1,540 @@
+---
+title: "LEAP_figures"
+output: html_document
+---
+
+should run this after LEAP_LICA to generate figures
+needs some global variables and objects that are set/made in LEAP_LICA
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(oro.nifti)
+library(patchwork)
+library(magrittr)
+library(wiqid)
+library(tidyverse)
+library(cowplot)
+library(ggnewscale)
+library(gridExtra)
+library(ggpubr)
+
+#slices for gradient figures
+sAX <- 26
+sSAG <- 42 #29
+sCOR <- 27
+
+#slices for spatial maps
+sAX1 <- 23
+sAX2 <- 29
+sAX3 <- 34
+sAX4 <- 50
+sAX5 <- 60
+
+LICA <- "VBM_DWI_congrads"                     ######### Always check this #############
+thr <- 0.7  ### always check, changed for visualizing IC3
+pdfH <- 0.75
+
+
+outdir <- paste0("/project/3022035.03/LEAP_long/stats/", LICA)               
+
+# these lines so you don't first need to run any other script
+mod_contrib <- read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/Modality_contributions.txt"))
+colnames(mod_contrib) <- sub("V", "IC", colnames(mod_contrib)) 
+mod_order <- read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/order_of_loaded_data.txt"), stringsAsFactors=FALSE)
+mod_order <- mod_order %>% separate(V1, c(NA,NA,NA,NA,NA,NA,NA, "mod",NA), sep="/")
+mod_contrib <- cbind(mod_contrib, mod_order)
+mod_gather <- mod_contrib %>% gather(comp, contrib, -mod)
+
+### Alternative script added for experimentation - always check ###
+
+#source("/project/3022035.03/congratICA/R/LICA_figures.R")
+source("/project/3022035.03/lenobl/scripts/R/LICA_figures_LO.R")
+```
+
+
+```{r get MNI background image}
+fMNI <- paste0("/opt/fsl/6.0.1/data/standard/MNI152_T1_2mm_brain.nii.gz")
+fMNImask <- paste0("/opt/fsl/6.0.1/data/standard/MNI152_T1_2mm_brain_mask.nii.gz")
+
+MNI <- readNIfTI(fMNI)
+mask <- readNIfTI(fMNImask)
+mask[mask ==0] <- NA
+MNI <- MNI*mask       #skip this if you don't want to remove background
+
+#axial 
+ax_gath <- mk_ax_slices(sAX)
+
+
+
+#sag 
+sag <- as.data.frame(MNI@.Data[sSAG, , ])
+sag$y <- paste0("y_", 1:nrow(sag))
+sag_gath <- sag %>% gather("x", "value", -y)
+sag_gath <- sag_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(sag)-1)))) %>%
+                        mutate(y = fct_relevel(y, paste0("y_", 1:nrow(sag))))
+sag_gath$value_scaled <- (sag_gath$value - min(sag_gath$value, na.rm =TRUE))/diff(range(sag_gath$value, na.rm =TRUE))
+
+#cor 
+cor <- as.data.frame(MNI@.Data[, sCOR,])
+cor$y <- paste0("y_", 1:nrow(cor))
+cor_gath <- cor %>% gather("x", "value", -y)
+cor_gath <- cor_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(cor)-1)))) %>%
+                        mutate(y = fct_relevel(y, paste0("y_", 1:nrow(cor))))
+cor_gath$value_scaled <- (cor_gath$value - min(cor_gath$value, na.rm =TRUE))/diff(range(cor_gath$value, na.rm =TRUE))
+
+#eg if you want to plot the MNI image (or any other single slice without over lay)
+# cor_slice <- cor_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(cor)-1)))) %>%
+#                         mutate(y = fct_relevel(y, paste0("y_", 1:nrow(cor)))) %>%
+#                                  ggplot(aes(x=y, y=x, fill = value)) +
+#   geom_raster() + scale_fill_gradient(low="black", high="white", na.value = "white") +
+#   theme(axis.text = element_blank(), axis.title = element_blank(), axis.ticks = element_blank(), 
+#         legend.position = "none", panel.grid.major = element_blank(),
+#         panel.grid.minor = element_blank(), panel.background = element_blank())
+
+```
+
+#check vs mod_order
+```{r VBM}
+#VBM_DWI_congrads 3
+#VBM_DWI 3
+fVBM <- paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/niftiOut_mi3.nii.gz")
+VBM <- readNIfTI(fVBM)
+
+```
+#check vs mod_order
+```{r cort G1 and G2}
+#G1
+fcortG1 <- paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/niftiOut_mi4.nii.gz")
+cortG1 <- readNIfTI(fcortG1)
+
+#G2
+fcortG2 <- paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/niftiOut_mi5.nii.gz")
+cortG2 <- readNIfTI(fcortG2)
+
+```
+#check vs mod_order
+
+```{r subcort G1 and G2}
+#G1
+fsubG1 <- paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/niftiOut_mi6.nii.gz")
+subG1 <- readNIfTI(fsubG1)
+
+#G2
+fsubG2 <- paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/Renormalized_G2.nii.gz")
+subG2 <- readNIfTI(fsubG2)
+
+```
+#check vs mod_order
+
+```{r DWI }
+#hard coded, check model order if you re-run LICA
+spatial_cortical_dwi <- read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/niftiOut_mi2.txt")) 
+colnames(spatial_cortical_dwi) <- sub("V", "IC", colnames(spatial_cortical_dwi)) 
+#spatial_cortical_dwi <- spatial_cortical_dwi %>% select(sig_ICs)
+
+spatial_subcortical_dwi <- read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/niftiOut_mi1.txt")) 
+colnames(spatial_subcortical_dwi) <- sub("V", "IC", colnames(spatial_subcortical_dwi)) 
+#spatial_subcortical_dwi <- spatial_subcortical_dwi %>% select(sig_ICs)
+
+### reps hardcoded, check everytime ###
+nRamyg <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/R_amygdala_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nLamyg <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/L_amygdala_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nRstr <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/R_striatum_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nLstr <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/L_striatum_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nRff <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/rh.fusiform_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nLff <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/lh.fusiform_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nRacc <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/rh.rostralanteriorcingulate_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nLacc <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/lh.rostralanteriorcingulate_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nRpc <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/rh.postcentral_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+nLpc <- read_table2("/project/3022035.03/LEAP_long/data/probtrackX_atlas/lh.postcentral_PCA_ind.txt", 
+                  col_names = FALSE) %>% nrow()
+
+Ramyg <- rep("R_amygdala", nRamyg) 
+Lamyg <- rep("L_amygdala", nLamyg) 
+Rstr <- rep("R_striatum", nRstr)
+Lstr <- rep("L_striatum", nLstr)
+Rff <- rep("R_fusiform", nRff)
+Lff <- rep("L_fusiform", nLff)
+Racc <- rep("R_ACC", nRacc) #3
+Lacc <- rep("L_ACC", nLacc) #2
+Rpc <- rep("R_postcentral", nRpc)
+Lpc <- rep("L_postcentral", nLpc)
+
+#diverging numbers of PCs per ROI call for specified lists
+RamygPCs <- paste0("PC",1:length(Ramyg))
+LamygPCs <- paste0("PC",1:length(Lamyg))
+RstrPCs <- paste0("PC",1:length(Rstr))
+LstrPCs <- paste0("PC",1:length(Lstr))
+RffPCs <- paste0("PC",1:length(Rff))
+LffPCs <- paste0("PC",1:length(Lff))
+RaccPCs <- paste0("PC",1:length(Racc))
+LaccPCs <- paste0("PC",1:length(Lacc))
+RpcPCs <- paste0("PC",1:length(Rpc))
+LpcPCs <- paste0("PC",1:length(Lpc))
+
+sub_rois_PCs <- c(RamygPCs,LamygPCs,RstrPCs,LstrPCs)
+cort_rois_PCs <- c(RffPCs, LffPCs, RaccPCs, LaccPCs, RpcPCs, LpcPCs) 
+
+#PCs <- paste0("PC", 1:reps) 
+
+sub_rois <- c(Ramyg,Lamyg,Rstr,Lstr)
+cort_rois <- c(Rff, Lff, Racc, Lacc, Rpc, Lpc)
+
+spatial_cortical_dwi$ROI <- cort_rois
+spatial_subcortical_dwi$ROI <- sub_rois
+
+spatial <- rbind(spatial_subcortical_dwi, spatial_cortical_dwi)
+spatial$PCs <- c(sub_rois_PCs, cort_rois_PCs)
+
+rownames(spatial) <- paste0(spatial$ROI,"-", spatial$PCs)
+spatial <- spatial %>% dplyr::select(-ROI, -PCs)
+
+spatial$ROI <- rownames(spatial)
+spatial <- spatial %>% separate(ROI, into=c("ROI","PCs"), sep="-")
+spatial_gath <- spatial %>% gather("comp", "value", -ROI, -PCs)
+
+
+#spatial_gath_PC100 <- spatial_gath %>% filter(PCs %in% PC100) 
+
+spatial_gath_cort <- spatial_gath %>% filter(ROI %in% c("L_postcentral",  "R_postcentral", "L_ACC", "R_ACC",
+                                  "L_fusiform", "R_fusiform"))
+spatial_gath_sub <- spatial_gath %>% filter(ROI %in% c("L_striatum","R_striatum",
+                                  "L_amygdala", "R_amygdala"))
+
+#spatial_gath %>% filter(comp == "IC65") %>% arrange(desc(abs(value))) %>% head(10) %>% select(ROI, PCs, value)
+#spatial_gath %>% filter(comp == "IC42") %>% arrange(desc(abs(value))) %>% head(10) %>% select(ROI, PCs, value)
+
+```
+
+
+
+
+```{r}
+            ###### make full spatial maps per IC - use LICA_figures.R ########
+
+lapply(sig_ICs_unadj, mk_spatial_fig_LEAP, 50)
+
+#mk_spatial_fig_LEAP("IC65", 50)
+#mk_spatial_fig_LEAP("IC62", 50)
+mk_spatial_fig_LEAP("IC3", 50)
+#mk_spatial_fig_LEAP("IC42", 50)
+#mk_spatial_fig_LEAP("IC70", 50)
+#mk_spatial_fig_LEAP("IC20", 50)
+#mk_spatial_fig_LEAP("IC55", 50)
+
+            ###### make seperate gradient spatial maps - use LICA_figures_LO.R #########
+
+source("/project/3022035.03/lenobl/scripts/R/LICA_figures_LO.R")
+
+#get gradient of interest
+#IC62 ASD vs Control gradients
+fsubG2asd <- paste0("/project/3022035.03/LEAP_long/data/fusiform_gradientMaps/Long/AverageASD.G2.rhfusi.nii.gz")
+fsubG2ctrl <- paste0("/project/3022035.03/LEAP_long/data/fusiform_gradientMaps/Long/AverageCtrl.G2.rhfusi.nii.gz")
+
+subG2asd <- readNIfTI(fsubG2asd)
+subG2ctrl <- readNIfTI(fsubG2ctrl)
+#make figure - define sAX, sSAG, sCOR - always check (might only work with LICA_figures_LO.R)
+
+mk_ortho_fig_perMod(subG2,28,26,44)
+
+#function to visualize the difference between gradients - (use fslmaths -sub to calculate difference beforehand)
+
+fsubG2diff <- paste0("/project/3022035.03/LEAP_long/data/fusiform_gradientMaps/Long/Diff_G2.rhfusi.nii.gz")
+subG2diff <- readNIfTI(fsubG2diff)
+
+mk_ortho_diff_fig_perMod(subG2diff,28,26,44)
+
+# grid the gradients into one figure for easy comparison 
+
+mk_ortho_fig_grid(subG2asd, subG2ctrl, subG2diff, 28, 26, 44)
+  
+```
+
+```{r}
+###### test area
+
+  # ax= 28, sag = 26, cor = 44
+  mod <- readNIfTI(fsubG2diff)
+
+  df3 <- mod@.Data#isolate 3d image for IC of interest #mod is the modality (VBM, gradients etc)
+  df3[df3 == 0] <- NA
+  
+  df3 <- wiqid::standardize(df3, center= TRUE, scale=FALSE) #recentre
+  df_abs <- df3 %>% abs() 
+
+  ax <- as.data.frame(MNI@.Data[, , 28])
+  ax$y <- paste0("y_", 1:nrow(ax))
+  ax_gath <- ax %>% gather("x", "value", -y)
+  ax_gath <- ax_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(ax)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(ax))))
+  ax_gath$value_scaled <- (ax_gath$value - min(ax_gath$value, na.rm =TRUE))/diff(range(ax_gath$value, na.rm =TRUE))
+  
+  ax1 <- as.data.frame(df3[, , 28])
+  ax1$y <- paste0("y_", 1:nrow(ax1))
+  ax1_gath <- ax1 %>% gather("x", "value", -y)
+  ax1_gath <- ax1_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(ax1)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(ax1))))
+  
+  ax_fig <- ggplot() + coord_fixed() + 
+    annotate(geom = 'raster', x = ax_gath$y, y = ax_gath$x, na.rm =TRUE,
+             fill = (scales::colour_ramp(c("black", "white"))(ax_gath$value_scaled)))
+  
+  ax_fig <- ax_fig + new_scale_fill() +
+  #  geom_tile(data = subset(ax1_gath, value > 0.001), aes(fill=value, x=y, y=x)) + 
+  #  scale_fill_gradientn(colors=c("#FFFFFF","#FFFF00","#FF0000"), na.value = "gray93",
+  #                       limits=c(0.01,0.08), breaks=c(0.04,0.08),labels=c(0.04,0.08), guide = guide_colourbar(nbin = 1000))
+  #ax_fig <- ax_fig + new_scale_fill() +
+  #  geom_tile(data = subset(ax1_gath, value < 0.001), aes(fill=value, x=y, y=x)) + 
+  #  scale_fill_gradientn(colors=c("#0033FF","#33FFFF","#FFFFFF"), na.value = "gray93",
+  #                       limits=c(-0.08,0.01), breaks=c(-0.08,-0.04),labels=c(-0.08,-0.04), guide = guide_colourbar(nbin = 1000)) + labs(fill = " ") +
+    geom_tile(data = subset(ax1_gath, abs(value) > 0.001) , aes(fill=value, x=y, y=x)) + 
+     scale_fill_gradientn(colors=c("#0033FF","#33FFFF","#FFFFFF","#FFFF00","#FF0000"), na.value = "gray93",
+                       limits=c(-0.08,0.08), breaks=c(-0.08,0,0.08),labels=c(-0.08,0,0.08), 
+                       oob=scales::squish, guide = guide_colourbar(nbin = 1000)) + labs(fill = " ") +
+    theme(text = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          legend.text = element_text(size = 4),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.2, "cm"),
+          legend.margin = margin(-0.5,0,0,0, unit="cm"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          panel.border = element_blank())
+  
+  sag <- as.data.frame(MNI@.Data[sSAG, ,])
+  sag$y <- paste0("y_", 1:nrow(sag))
+  sag_gath <- sag %>% gather("x", "value", -y)
+  sag_gath <- sag_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(sag)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(sag))))
+  sag_gath$value_scaled <- (sag_gath$value - min(sag_gath$value, na.rm =TRUE))/diff(range(sag_gath$value, na.rm =TRUE))
+  
+  sag1 <- as.data.frame(df3[sSAG, ,])
+  sag1$y <- paste0("y_", 1:nrow(sag1))
+  sag1_gath <- sag1 %>% gather("x", "value", -y)
+  sag1_gath <- sag1_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(sag1)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(sag1))))
+  
+  sag_fig <- ggplot() + coord_fixed() + 
+    annotate(geom = 'raster', x = sag_gath$y, y = sag_gath$x, na.rm =TRUE,
+             fill = (scales::colour_ramp(c("black", "white"))(sag_gath$value_scaled)))
+  
+  sag_fig <- sag_fig + new_scale_fill() +
+  #  geom_tile(data = subset(sag1_gath, value > 0.001), aes(fill=value, x=y, y=x)) + 
+  #  scale_fill_gradientn(colors=c("#FFFFFF","#FFFF00","#FF0000"), na.value = "gray93",
+  #                       limits=c(0.01,0.08), breaks=c(0.04,0.08),labels=c(0.04,0.08), guide = guide_colourbar(nbin = 1000))
+  #sag_fig <- sag_fig + new_scale_fill() +
+  #  geom_tile(data = subset(sag1_gath, value < 0.001), aes(fill=value, x=y, y=x)) + 
+  #  scale_fill_gradientn(colors=c("#0033FF","#33FFFF","#FFFFFF"), na.value = "gray93",
+  #                       limits=c(-0.08,0.01), breaks=c(-0.08,-0.04),labels=c(-0.08,-0.04), guide = guide_colourbar(nbin = 1000)) + labs(fill = " ") +
+    geom_tile(data = subset(sag1_gath, abs(value) > 0.001), aes(fill=value, x=y, y=x)) + 
+    scale_fill_gradientn(colors=c("#0033FF","#33FFFF","#FFFFFF","#FFFF00","#FF0000"), na.value = "gray93",
+                         limits=c(-0.08,0.08), breaks=c(-0.08,0,0.08),labels=c(-0.08,0,0.08), oob=scales::squish, guide = guide_colourbar(nbin = 10000)) + labs(fill = " ") +
+    theme(axis.text = element_blank(), axis.title = element_blank(), axis.ticks = element_blank(), 
+          legend.position = "none", panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), panel.background = element_blank(), panel.border = element_blank())
+  
+  
+  cor <- as.data.frame(MNI@.Data[,sCOR, ])
+  cor$y <- paste0("y_", 1:nrow(cor))
+  cor_gath <- cor %>% gather("x", "value", -y)
+  cor_gath <- cor_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(cor)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(cor))))
+  cor_gath$value_scaled <- (cor_gath$value - min(cor_gath$value, na.rm =TRUE))/diff(range(cor_gath$value, na.rm =TRUE))
+  
+  cor1 <- as.data.frame(df3[, sCOR,])
+  cor1$y <- paste0("y_", 1:nrow(cor1))
+  cor1_gath <- cor1 %>% gather("x", "value", -y)
+  cor1_gath <- cor1_gath %>% mutate(x = fct_relevel(x, paste0("V", 1:(ncol(cor1)-1)))) %>%
+    mutate(y = fct_relevel(y, paste0("y_", 1:nrow(cor1))))
+  
+  cor_fig <- ggplot() + coord_fixed() + 
+    annotate(geom = 'raster', x = cor_gath$y, y = cor_gath$x, na.rm =TRUE,
+             fill = (scales::colour_ramp(c("black", "white"))(cor_gath$value_scaled))) 
+  
+  cor_fig <- cor_fig + new_scale_fill() +
+  #  geom_tile(data = subset(cor1_gath, value > 0.001), aes(fill=value, x=y, y=x)) + 
+  #  scale_fill_gradientn(colors=c("#FFFFFF","#FFFF00","#FF0000"), na.value = "gray93",
+  #                       limits=c(0.01,0.08), breaks=c(0.04,0.08),labels=c(0.04,0.08), guide = guide_colourbar(nbin = 1000))
+  #cor_fig <- cor_fig + new_scale_fill() +
+  #  geom_tile(data = subset(cor1_gath, value < 0.001), aes(fill=value, x=y, y=x)) + 
+  #  scale_fill_gradientn(colors=c("#0033FF","#33FFFF","#FFFFFF"), na.value = "gray93",
+  #                       limits=c(-0.08,-0.01), breaks=c(-0.08,-0.04),labels=c(-0.08,-0.04), guide = guide_colourbar(nbin = 1000)) + labs(fill = " ") +
+    geom_tile(data = subset(cor1_gath, abs(value) > 0.001), aes(fill=value, x=y, y=x)) + 
+    scale_fill_gradientn(colors=c("#0033FF","#33FFFF","#FFFFFF","#FFFF00","#FF0000"), na.value = "gray93",
+                         limits=c(-0.08,0.08), breaks=c(-0.08,0,0.08),labels=c(-0.08,0,0.08), oob=scales::squish, guide = guide_colourbar(nbin = 1000)) + labs(fill = " ") +
+    theme(axis.text = element_blank(), axis.title = element_blank(), axis.ticks = element_blank(), 
+          legend.position = "none", panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), panel.background = element_blank(), panel.border = element_blank())
+  
+  figs <- plot_grid(sag_fig, cor_fig, ax_fig, ncol=3, rel_widths = c(1.2,1.0,1.2),
+                    rel_heights = c(1.2,1.0,1.2), axis="t") 
+  
+  fig_file <- file.path(outdir, paste0("/spatial_maps/alt_maps/subG2_rh.ff_diff.png"))
+  ggsave(fig_file, figs, dpi=300, width=12, height = 6, units = "cm") 
+
+```
+
+
+
+```{r}
+#figure out how to back project dwi data
+outdir <- "/project/3022035.03/LEAP_long/stats/ICs80_n456_o"
+glasser <- read.csv("/project/3022035.03/MMPatlas/MMP_descriptors.csv") %>% 
+  dplyr::select("region", "cortex", "Cortex_ID", "regionID")
+glasser$ROI <- paste0("ROI_", glasser$regionID)
+region <- c("L_amygdala", "L_striatum", "L_thalamus", "L_hippocampus", "L_pallidum",
+                            "R_amygdala", "R_striatum", "R_thalamus", "R_hippocampus", "R_pallidum")
+cortex <- rep("subcortical", 10)
+Cortex_ID = rep(23,10)
+regionID = 381:390
+
+HO <- data.frame(region, cortex, Cortex_ID, regionID)
+HO$ROI <- region
+atlas <- rbind(glasser, HO)
+
+pcadir <- "/project/3022035.03/LEAP/data"
+
+get_pca_data <- function(ROI){ ###### THIS ISN'T GENERALISING #####
+  pca <- read_csv(file.path(pcadir, paste0("probtrackX_atlas/", ROI, "_PCA_n315.csv")))
+  ind <- read.table(file.path(pcadir, paste0("probtrackX_atlas/", ROI, "_PCA_n315_ind.txt")), quote="\"", comment.char="", stringsAsFactors=FALSE)
+  eig <- pca[2:315,] %>% separate(eig, into = c("comp", "eigenvalue", "percentage of variance", "cumlative percentage of variance"), sep= ";") %>%
+    mutate_at(c("eigenvalue", "percentage of variance", "cumlative percentage of variance"), as.numeric) 
+  Row1 <- which(pca == "contrib", arr.ind=TRUE)[1] +2
+  Rown <- which(pca == "ind", arr.ind=TRUE)[1] -1
+  contrib <- pca[Row1:Rown ,] %>% separate(eig, into = c("ROIvox", paste0("dim", 1:30)), sep = ";") %>%
+    mutate_at(c(paste0("dim", 1:30)), as.numeric) 
+  contrib <- contrib %>% separate(ROIvox, into =c("ROI", "vox"), sep = "_vo") 
+  pca <- list(eig, contrib, ind)
+  return(pca)
+}
+
+#old ones
+#L_str_contrib <- read_csv("/project/3022035.03/LEAP/data/probtrackX_atlas/L_str_contrib.csv") %>% dplyr::select(-X1)
+#R_str_contrib <- read_csv("/project/3022035.03/LEAP/data/probtrackX_atlas/R_str_contrib.csv") %>% dplyr::select(-X1)
+
+R_str_pca <- get_pca_data("R_striatum")
+R_str_eig <- R_str_pca[[1]]
+R_str_contrib <- R_str_pca[[2]]
+R_str_ind <- R_str_pca[[3]]
+R_str_contrib <- merge(R_str_contrib, atlas, by="ROI")
+
+L_str_pca <- get_pca_data("L_striatum")
+L_str_eig <- L_str_pca[[1]]
+L_str_contrib <- L_str_pca[[2]]
+L_str_ind <- L_str_pca[[3]]
+L_str_contrib <- merge(L_str_contrib, atlas, by="ROI")
+
+R_pc_pca <- get_pca_data("rh.postcentral")
+R_pc_eig <- R_pc_pca[[1]]
+R_pc_contrib <- R_pc_pca[[2]]
+R_pc_ind <- R_pc_pca[[3]]
+R_pc_contrib <- merge(R_pc_contrib, atlas, by="ROI")
+
+mk_dwi_fig_perPC <- function(df, PC, roi){
+ # spatial <- spatial %>% select(IC, ROI, PCs)
+  dfnonnum <- df %>% dplyr::select(ROI, vox, region, cortex, Cortex_ID, regionID)
+  dfnum <- df %>% dplyr::select(starts_with("dim"))
+  df_abs <- dfnum %>% abs() 
+  perc95 <- df_abs[[ PC ]] %>% quantile(0.95)
+  dfnum[df_abs < perc95] <- NA
+  df <-  cbind(dfnum, dfnonnum)
+  #df[df >= 20] <- 20
+  #drop cols and rows with nothing interesting
+  #df <- df %>% filter(abs(.[[ PC ]]) > 0)
+  
+  df$voxnum <- sub( "x", "", df$vox) %>% as.numeric()
+
+  figPC <- df %>% 
+    arrange(Cortex_ID)%>%
+    mutate(ROI = factor(ROI, unique(ROI))) %>%
+    #arrange(desc(.[[ PC ]])) %>%               # sort your dataframe
+    #mutate(ROI = factor(ROI, unique(ROI))) %>%
+    mutate(vox = fct_reorder(vox, voxnum)) %>%
+    #mutate(vox = factor(vox, unique(vox))) %>%
+    ggplot(aes(x=vox, y=ROI)) +
+    geom_tile(aes_string(fill = PC))+
+    labs(x="voxels", y="atlas ROIs") + 
+    theme(text=element_text(family="Arial", size =4),
+                                                            axis.text = element_blank(),
+                                                            #axis.text.x = element_text(angle = 90, hjust= 0.2), 
+                                                            axis.title = element_text(size=8),
+                                                            axis.ticks = element_blank(),
+                                                            legend.text = element_text(size = 8), 
+                                                            legend.key.size = unit(0.4, "cm"),
+                                                            legend.title = element_blank()) +
+    scale_fill_gradient(low="red", high = "yellow", na.value = "gray93") +
+    #breaks=seq(-0,20, by=10))  + 
+    scale_x_discrete(position = "top") +
+    scale_y_discrete(limits = rev(levels(df$ROI)))
+
+  
+  legend_ord <- levels(with(df, reorder(cortex, Cortex_ID)))  
+  figCortex <- df %>% dplyr::select(ROI, cortex, Cortex_ID) %>% unique() %>%
+    arrange(Cortex_ID)%>%
+    mutate(ROI = factor(ROI, unique(ROI))) %>% 
+       ggplot(aes(x = ROI, y=1, fill=cortex)) +
+  geom_bar(position="stack", stat="identity") + coord_flip() +
+  scale_fill_igv(breaks=rev(legend_ord)) +
+    theme(text=element_text(family="Arial"),
+  axis.text=element_blank(),
+  axis.title=element_blank(),
+  axis.ticks = element_blank(),
+  legend.position = "left", 
+  legend.text = element_text(size=4), 
+  legend.key.size = unit(0.25, "cm"),
+  legend.title = element_blank(),
+  legend.margin=margin(),
+  legend.box="horizontal", 
+  panel.grid = element_blank(),
+  panel.border = element_blank()) +
+    guides(fill=guide_legend(ncol=1))
+  
+  figVox <- df %>% dplyr::select(vox, voxnum) %>% unique() %>%
+    mutate(vox = fct_reorder(vox, voxnum)) %>% 
+       ggplot(aes(x = vox, y=1, fill=voxnum)) +
+  geom_bar(position="stack", stat="identity")  +
+  scale_fill_gradient(low = "#0033FF", high= "#33FFFF", limits = c(0, max(df$voxnum))) +
+    theme(text=element_text(family="Arial"),
+  axis.text=element_blank(),
+  axis.title=element_blank(),
+  axis.ticks = element_blank(),
+  legend.position = "none", 
+  panel.grid = element_blank(),
+  panel.border = element_blank()) 
+  
+  fig  <- plot_spacer() +figVox + figCortex + figPC + 
+     plot_layout(ncol=2, widths = c(0.03, 1), heights = c(0.03,1))
+    #plot_grid(NULL, figVox, figCortex, figPC, rel_widths = c(0.3, 1, 0.3, 1),
+    #                rel_heights = c(0.1, 1, 0.1, 1),
+    #                 align= c("none", "hv", "hv", "hv"), axis = c("none", "tblr", "tblr", "tblr"), ncol=2)
+ 
+  
+  fig_file <- file.path(outdir, paste0(roi, "_", PC,"_DWI.png"))
+  ggsave(fig_file, fig, dpi=300, width=20, height = 12, units = "cm")
+  
+  return(fig)
+}
+
+
+mk_dwi_fig_perPC(R_str_contrib, "dim7", "Rstr")
+mk_dwi_fig_perPC(R_str_contrib, "dim6", "Rstr")
+mk_dwi_fig_perPC(R_str_contrib, "dim8", "Rstr")
+mk_dwi_fig_perPC(R_str_contrib, "dim3", "Rstr")
+
+mk_dwi_fig_perPC(L_str_contrib, "dim8", "Lstr")
+
+mk_dwi_fig_perPC(R_pc_contrib, "dim4", "Rpc")
+
+```

@@ -1,0 +1,37 @@
+#Lennart Oblong 19.08.2022
+#Code for calculating the Bayesian Information Criterion (BIC) for LEAP sbjs that underwent connectopic map calculation.
+#Used to assess the best model order for TSM, based on the log-likelihood calculated by congrads code (by Andre Marquand, Koen Haak, Christian Beckmann)
+#Only works AFTER the TSM has been calculated, as this code pulls the data from the outdirs created by TSM - and is based on the negloglik output
+
+library(tidyverse)
+library(knitr)
+library(mgcv)
+
+#get data 
+
+negLL <- read.table("/project/3022035.03/LEAP/data/congrads/negLL_modorder2.txt", colClasses="numeric")
+#negLL <- read.table("/project/3022035.03/LEAP2/data/congrads/negLL_modorder2.txt", colClasses="numeric")
+subs1 <- read.table("/project/3022035.03/LEAP/clinical/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+subs2 <- read.table("/project/3022035.03/LEAP2/data/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+
+outdir <- "/project/3022035.03/LEAP/data/congrads"
+outdir <- "/project/3022035.03/LEAP2/data/congrads"
+
+#turn negloglik into loglik
+
+LL <- negLL*(-1)
+
+#define function
+calculate_bic <- function(n, LL, num_params){
+  
+  bic <- (-2 * LL) + (num_params * log(n))
+  
+  return(bic) }
+
+#number of parameters is hardcoded, depends on the model order! Always check this! (Numparam = MO * 3)
+#calculate the bic, always adjust values for n and num_params !!!
+
+bic = calculate_bic(315, LL, 6)
+
+bic_file <- paste0(outdir, "/","BIC_modorder2.csv")
+write.csv(bic, bic_file, row.names = T)

@@ -1,0 +1,189 @@
+---
+title: "ProbtrackX matrices wrangling"
+author: "Nat Forde"
+date: "April 24, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(Matrix)
+library(reshape2)
+
+```
+
+```{r load stuff}
+
+# LEAP
+subs <- read.table("/project/3022035.03/LEAP2/final_overlapping_subs.txt") %>% t()
+outdir <- "/project/3022035.03/LEAP2/data"
+
+ROIs <- read.table("/project/3022035.03/MMPatlas/targetList.txt", stringsAsFactors=FALSE)
+
+```
+
+```{r}
+
+ROIs <- ROIs %>% separate(V1, c(NA,NA,NA,NA, "ROI"), sep="/")
+ROIs$ROI <- sub(".nii.gz", "", ROIs$ROI)
+
+```
+
+```{r define functions}
+#merge
+merge_thresh <- function(ROI) {
+  mat1 <- read.table(paste0(outdir,"/probtrackX_atlas/",subs[1],"/",ROI,"/matrix_seeds_to_all_targets"))
+  colnames(mat1) <- ROIs$ROI
+  mat1$vox_num <- paste0("vox",(1:nrow(mat1)))
+  
+  mat1_gather <- mat1 %>% gather(ROI, value, -vox_num)
+  colnames(mat1_gather)[3] <- subs[1]
+  
+ # mat1_gather <- mat1_gather %>% top_frac(top_pc) # keeps top n% of all possible connections
+
+  for(i in 2:length(subs)){
+  #for(i in 2:10){ #for testing
+    mat2 <- read.table(paste0(outdir,"/probtrackX_atlas/",subs[i],"/",ROI,"/matrix_seeds_to_all_targets"))
+    colnames(mat2) <- ROIs$ROI
+    mat2$vox_num <- paste0("vox",(1:nrow(mat2)))
+  
+    mat2_gather <- mat2 %>% gather(ROI, value, -vox_num)
+    colnames(mat2_gather)[3] <- subs[i]
+    #mat2_gather <- mat2_gather %>% top_frac(top_pc)
+    
+    mat1_gather <- merge(mat1_gather, mat2_gather, by=c("ROI","vox_num"), all=TRUE)
+  
+  }
+
+  # #keep if present in at least 50% of subjects
+  #mat1_gather <- mat1_gather[which(rowMeans(!is.na(mat1_gather)) > 0.5), ]
+  # 
+ # mat1_gather[is.na(mat1_gather)] <- 0
+  # 
+  mat1 <- mat1_gather %>% dplyr::select(-ROI, -vox_num)
+  #outfile1 <- file.path(outdir, "flica_input/data4dmat", paste0(ROI,"_dwi"), "probtrackX_mat_combined.txt")
+  #write.table(as.matrix(mat1), outfile1, row.names = F, col.names = F)
+  # 
+  outfile2 <- file.path(outdir, "probtrackX_atlas", paste0(ROI,"_combined_mats.csv"))
+  write.csv(mat1_gather, outfile2)
+  return(mat1_gather)
+} 
+
+
+library(FactoMineR)
+library(factoextra)
+#PCA
+dim_red <- function(mat, region) {
+
+  mat$ROIvox <- paste0(mat$ROI, "_", mat$vox_num)
+  mat1 <- dplyr::select(mat, -ROI, -vox_num)
+  rownames <- mat1$ROIvox 
+  #rownames(mat1) <- mat1$ROIvox
+  mat1 <- dplyr::select(mat1, -ROIvox)
+  mat1_t <- as.data.frame(t(mat1))
+  colnames(mat1_t) <- rownames
+  #mat1_t$subject <- rownames(mat1_t)
+
+  #demean & remove vars with no variance (within seed connectivity)
+
+  var <- mat1_t[which(!unlist(lapply(mat1_t, function(x) 0 == var(if (is.factor(x)) as.integer(x) else x))))] # remove cols with no variance
+  var_demeaned <- scale(var, center= TRUE, scale=FALSE) %>% as.data.frame() # demean the remaining
+  rownames(var_demeaned) <-rownames(mat1_t)
+ 
+   # svd <- prcomp(var_demeaned, scale=FALSE)
+  # df_svd <- as.data.frame(svd$x[ ,1:679])
+  # colnames(df_svd) <- colnames(var)
+  # 
+  # mat_svd_t <- svd$x[ ,1:679] %>% t()
+  rnk <- rankMatrix(as.matrix(var_demeaned))
+  pca <- PCA(var_demeaned, scale.unit = FALSE, ncp = (rnk[1]-1), graph = FALSE)
+  
+  # eig.val <- get_eigenvalue(pca)
+  # eig.val
+  # 
+  # var <- get_pca_var(pca)
+  # var
+  #ind <- get_pca_ind(pca)
+  #ind_coord_t <- ind$coord %>% t()
+  
+  outfile <- file.path(outdir, "probtrackX_atlas", paste0(region, "_PCA.csv"))
+  write.infile(pca, outfile, sep = ";")
+    
+  #outfile1 <- file.path(outdir, "probtrackX_atlas", paste0(region,"_PCA_ind.txt"))
+  #write.table(ind_coord_t, outfile1, row.names = F, col.names = F)
+
+  return(pca)
+}
+
+```
+
+```{r run funcs to merge & PCA}
+
+#R_amyg_merged <- merge_thresh("R_amygdala")
+R_amyg_merged <- read_csv(file.path(outdir, "probtrackX_atlas/R_amygdala_combined_mats.csv")) %>% select(-X1)
+R_amyg_pca <- dim_red(R_amyg_merged, "R_amygdala")
+
+#L_amyg_merged <- merge_thresh("L_amygdala")
+L_amyg_merged <- read_csv(file.path(outdir, "probtrackX_atlas/L_amygdala_combined_mats.csv")) %>% select(-X1)
+L_amyg_pca <- dim_red(L_amyg_merged, "L_amygdala")
+
+#R_str_merged <- merge_thresh("R_striatum")
+R_str_merged <- read_csv(file.path(outdir, "probtrackX_atlas/R_striatum_combined_mats.csv")) %>% select(-X1)
+R_str_pca <- dim_red(R_str_merged, "R_striatum")
+
+#L_str_merged <- merge_thresh("L_striatum")
+L_str_merged <- read_csv(file.path(outdir, "probtrackX_atlas/L_striatum_combined_mats.csv")) %>% select(-X1)
+L_str_pca <- dim_red(L_str_merged, "L_striatum")
+
+#R_acc_merged <- merge_thresh("rh.rostralanteriorcingulate")
+#R_acc_merged <- read_csv(file.path(outdir, "probtrackX_atlas/rh.rostralanteriorcingulate_combined_mats.csv")) %>% select(-X1)
+#R_acc_pca <- dim_red(R_acc_merged, "rh.rostralanteriorcingulate")
+
+#L_acc_merged <- merge_thresh("lh.rostralanteriorcingulate")
+#L_acc_merged <- read_csv(file.path(outdir, "probtrackX_atlas/lh.rostralanteriorcingulate_combined_mats.csv")) %>% select(-X1)
+#L_acc_pca <- dim_red(L_acc_merged, "lh.rostralanteriorcingulate")
+
+#R_ff_merged <- merge_thresh("rh.fusiform")
+#R_ff_merged <- read_csv(file.path(outdir, "probtrackX_atlas/rh.fusiform_combined_mats.csv")) %>% select(-X1)
+#R_ff_pca <- dim_red(R_ff_merged, "rh.fusiform")
+
+#L_ff_merged <- merge_thresh("lh.fusiform")
+#L_ff_merged <- read_csv(file.path(outdir, "probtrackX_atlas/lh.fusiform_combined_mats.csv")) %>% select(-X1)
+#L_ff_pca <- dim_red(L_ff_merged, "lh.fusiform")
+
+#R_pc_merged <- merge_thresh("rh.postcentral")
+#R_pc_merged <- read_csv(file.path(outdir, "probtrackX_atlas/rh.postcentral_combined_mats.csv")) %>% select(-X1)
+#R_pc_pca <- dim_red(R_pc_merged, "rh.postcentral")
+
+#L_pc_merged <- merge_thresh("lh.postcentral")
+#L_pc_merged <- read_csv(file.path(outdir, "probtrackX_atlas/lh.postcentral_combined_mats.csv")) %>% select(-X1)
+#L_pc_pca <- dim_red(L_pc_merged, "lh.postcentral")
+
+
+```
+
+```{r}
+ 
+R_amyg_ind <- read.table(file.path(outdir, "probtrackX_atlas/R_amygdala_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+L_amyg_ind <- read.table(file.path(outdir, "probtrackX_atlas/L_amygdala_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+R_str_ind <- read.table(file.path(outdir, "probtrackX_atlas/R_striatum_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+L_str_ind <- read.table(file.path(outdir, "probtrackX_atlas/L_striatum_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+R_ff_ind <- read.table(file.path(outdir, "probtrackX_atlas/rh.fusiform_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+L_ff_ind <- read.table(file.path(outdir, "probtrackX_atlas/lh.fusiform_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+R_acc_ind <- read.table(file.path(outdir, "probtrackX_atlas/rh.rostralanteriorcingulate_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+L_acc_ind <- read.table(file.path(outdir, "probtrackX_atlas/lh.rostralanteriorcingulate_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+R_pc_ind <- read.table(file.path(outdir, "probtrackX_atlas/rh.postcentral_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+L_pc_ind <- read.table(file.path(outdir, "probtrackX_atlas/lh.postcentral_PCA_ind.txt"), quote="\"", comment.char="", stringsAsFactors=FALSE)
+
+subcort <- rbind(R_amyg_ind,L_amyg_ind, R_str_ind, L_str_ind)
+cort <- rbind(R_ff_ind, L_ff_ind, R_acc_ind, L_acc_ind, R_pc_ind, L_pc_ind)
+
+subcort_file <- file.path(outdir, "flica_input/data4d/subcortical_dwi", "probtrackX_pca.txt")
+write.table(subcort, subcort_file, row.names = F, col.names = F)
+
+cort_file <- file.path(outdir, "flica_input/data4d/cortical_dwi", "probtrackX_pca.txt")
+write.table(cort, cort_file, row.names = F, col.names = F)
+
+```

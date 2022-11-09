@@ -1,0 +1,160 @@
+
+``` {r intro and library}
+
+#Lennart Oblong 19.08.2022
+#Code for calculating the Bayesian Information Criterion (BIC) and Akaike Information Criterion (AIC) for LEAP sbjs that underwent 
+#based on the log-likelihood calculated by congrads code (by Andre Marquand, Koen Haak, Christian Beckmann)
+#Only works AFTER the TSM has been calculated, as this code pulls the data from the outdirs created by TSM - and is based on the negloglik output
+# NOTE: The TSM is computed with other scripts (submit_TSM.sh & fusiform_TSM_NF.sh). If correct model order is skipped the first part of this script can be skipped.
+
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/project/3022035.03/")
+                                       
+library(tidyverse)
+library(data.table)
+library(knitr)
+library(mgcv)
+library(lme4)
+library(car)
+library(zoo)
+library(ggsci)
+library(gridExtra)
+library(kableExtra)
+library(cowplot)
+library(readxl)
+library(QuantPsyc)
+library("Cairo")
+library(grDevices)
+library(svglite)
+library(ggh4x)
+
+### Importantly, this script calls demographic data of the LEAP cohort when computing the correlation. Thus the script "/project/3022035.03/lenobl/scripts/stats/LEAP_LICA.Rmd" must be run before running this script ###
+
+```
+
+```{r calucalte bic to determine best model order for tsm}
+
+#get neg log lik and bind into coherent dataframe. negloglik files created by get_LL.sh script, run in bash. 
+temp1 = list.files(path = "/project/3022035.03/LEAP/data/congrads/TSM_rh.fusiformG2", pattern = "*.txt", full.names = TRUE)
+negLL1 = rbind.data.frame(lapply(temp1, read.table))
+temp2 = list.files(path = "/project/3022035.03/LEAP2/data/congrads/TSM_rh.fusiformG2", pattern = "*.txt", full.names = TRUE)
+negLL2 = rbind.data.frame(lapply(temp2, read.table))
+
+#get sub list
+subs1 <- read.table("/project/3022035.03/LEAP/clinical/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+subs2 <- read.table("/project/3022035.03/LEAP2/data/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+
+#name columns and rows
+row.names(negLL1) <- subs1
+colnames(negLL1) <- c("MO2", "MO3", "MO4", "MO5", "MO6", "MO7", "MO8", "MO9", "MO10")
+row.names(negLL2) <- subs2
+colnames(negLL2) <- c("MO2", "MO3", "MO4", "MO5", "MO6", "MO7", "MO8", "MO9", "MO10")
+
+outdir1 <- "/project/3022035.03/LEAP/data/congrads/TSM_rh.fusiformG2"
+outdir2 <- "/project/3022035.03/LEAP2/data/congrads/TSM_rh.fusiformG2"
+
+#turn negloglik into loglik
+LL1 <- negLL1*(-1)
+LL2 <- negLL2*(-1)
+
+#### define functions #####
+#number of parameters is hardcoded, depends on the model order! Always check this! (Numparam = MO * 3)
+#Note that n is NOT the subject number, but the number of voxels in the scan. Hardcoded - always check!!!
+
+#test_negLL <- read.table("/project/3022035.03/LEAP/data/congrads/negLL_modorder2.txt")
+#test_LL <- test_negLL*(-1)
+
+#bic <- calculate_bic(1613, test_LL, 6)
+
+#bic function
+calculate_bic <- function(n, LL, num_params){
+  bic <- (-2 * LL) + (num_params * log(n))
+  return(bic) }
+num_params <- c(6,9,12,15,18,21,24,27,30)
+n <- 1613
+
+#calculate bic for LEAP 1 and 2
+bic1 <- mapply(LL1, FUN = calculate_bic, n=n, num_params=num_params)
+row.names(bic1) <- subs1
+bic1 <- as.data.frame(bic1)
+
+bic2 <- mapply(LL2, FUN = calculate_bic, n=n, num_params=num_params)
+row.names(bic2) <- subs2
+bic2 <- as.data.frame(bic2)
+
+
+#AIC function
+calculate_aic <- function(n, LL, num_params){
+  aic <- (-2 / n * LL) + (2 * num_params / n)
+    return(aic)  }
+
+#calculate aic for LEAP 1 and 2
+aic1 <- mapply(LL1, FUN = calculate_aic, n=n, num_params=num_params)
+row.names(aic1) <- subs1
+aic1 <- as.data.frame(aic1)
+
+aic2 <- mapply(LL2, FUN = calculate_aic, n=n, num_params=num_params)
+row.names(aic2) <- subs2
+aic2 <- as.data.frame(aic2)
+
+```
+
+```{r determine MO using bic and aic}
+
+#find minimum value for all MOs per sbj
+bic1$min_MO = colnames(bic1)[apply(bic1, 1, which.min)]
+bic1$min_MO <- as.factor(bic1$min_MO)
+
+bic2$min_MO = colnames(bic2)[apply(bic2, 1, which.min)]
+bic2$min_MO <- as.factor(bic2$min_MO)
+
+aic1$min_MO = colnames(aic1)[apply(aic1, 1, which.min)]
+aic1$min_MO <- as.factor(aic1$min_MO)
+
+aic2$min_MO = colnames(aic2)[apply(aic2, 1, which.min)]
+aic2$min_MO <- as.factor(aic2$min_MO)
+#interrogate the files with summary function to get a count of factorized colnames
+
+
+#save final files for later reference
+bic_file1 <- paste0(outdir1, "/","BIC_MOtest.csv")
+write.csv(bic1, bic_file1, row.names = T)
+bic_file2 <- paste0(outdir2, "/","BIC_MOtest.csv")
+write.csv(bic2, bic_file2, row.names = T)
+aic_file1 <- paste0(outdir1, "/","AIC_MOtest.csv")
+write.csv(aic1, aic_file1, row.names = T)
+aic_file2 <- paste0(outdir2, "/","AIC_MOtest.csv")
+write.csv(aic2, aic_file2, row.names = T)
+
+```
+
+```{r compute correlation}
+
+#get coefficients of correct model order, then bind to "raw" to easliy compute correlation
+
+TSMcoefLEAP1 <- read.csv("/project/3022035.03/LEAP/data/congrads/TSMcoef.csv", colClasses="numeric")
+TSMcoefLEAP2 <- read.csv("/project/3022035.03/LEAP2/data/congrads/TSMcoef.csv", colClasses="numeric")
+
+TSMcoefLEAP1_full <- rbind(subs1, TSMcoefLEAP1)
+TSMcoefLEAP2_full <- rbind(subs2, TSMcoefLEAP2)
+
+TSMcoef <- cbind(TSMcoefLEAP1_full, TSMcoefLEAP2_full)
+
+#dataTSM <- rbind(dataASD, TSMcoef)
+
+# define function
+
+all_stats_lme <- function(x, data){
+    form <- formula(paste0(i,"~", x, "+ ageyrs + sex + site + timepoint")) ##### + fsiq  #### need to add and check effect
+    mod <- lme(fixed=form,random = ~1 | subjects, data=data, na.action = na.omit, control = lmeControl(opt = 'nlminb'))
+    mod$call$fixed <- form
+    mod
+  }
+
+  Stats_TSM_dx <- all_stats_lme("diagnosis", TSMcoef)
+  
+
+
+
+
+```

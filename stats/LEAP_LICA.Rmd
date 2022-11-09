@@ -1,0 +1,1214 @@
+---
+  title: "LICA LEAP"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#select LICA run to use
+LICA <- "VBM_DWI_congrads"                     ######### Always check this #############
+type <- "all" # set if you want to run on all available data, longitudinal data only ("long") or 1 scan per individual ("indiv", lm)
+
+#Modality, LICA))
+library(tidyverse)
+library(knitr)
+library(mgcv)
+library(lme4)
+library(car)
+library(zoo)
+library(ggsci)
+library(gridExtra)
+library(kableExtra)
+library(cowplot)
+library(readxl)
+library(QuantPsyc)
+library("Cairo")
+library(grDevices)
+library(svglite)
+library(ggh4x)
+```
+
+```{r load}
+outdir <- paste0("/project/3022035.03/LEAP_long/stats/", LICA)    
+
+behaviour <- read_xlsx("/project/3022035.03/LEAP/clinical/LEAP_t1_t2_Core clinical variables_03-09-19-withlabels.xlsx")
+#behaviour <- read_xlsx("/project/3022035.03/LEAP/clinical/EUAIMS_T1_IMPUTED_17112020.xlsx")
+behaviour[behaviour == 999] <- NA
+behaviour[behaviour == 777] <- NA
+
+beh1 <- behaviour %>% dplyr::select("subjects", starts_with("t1_"))
+
+colnames(beh1) <- sub("t1_","",colnames(beh1))
+beh1$timepoint <- "t1"
+
+beh2 <- behaviour %>% dplyr::select("subjects", starts_with("t2_"))
+
+colnames(beh2) <- sub("t2_","",colnames(beh2))
+beh2$timepoint <- "t2"
+
+
+beh1 <- beh1[,c("subjects","diagnosis", "sex", "site", "ageyrs", "fsiq",
+                "rrb_css_all", "sa_css_all", "css_total_all",  #### not using imputed data as not avail for t2
+                "srs_tscore_combined", "ssp_total", "rbs_total", 
+                "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint")]
+
+beh2 <- beh2[,c("subjects", "sex", "site", "ageyrs",
+                "rrb_css", "sa_css", "css_total", 
+               "srs_tscore_combined", "ssp_total", "rbs_total", 
+               "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint")]
+
+selected_columns <- beh1[,c('subjects','fsiq','diagnosis')]
+
+beh2 <- merge(beh2, selected_columns, by.x = "subjects", all=TRUE) 
+
+### Timepoint 2 clinical core date does NOT contain the following: `adi_rrb_total`, `adi_communication_total`, `adi_social_total` # thus excluded 
+
+subs1 <- read.table("/project/3022035.03/LEAP/clinical/final_overlapping_subs.txt", colClasses = "numeric")  %>% unlist() %>% unname() ######### Always check this #############
+
+subs2 <- read.table("/project/3022035.03/LEAP2/data/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+
+beh1 <- filter(beh1, subjects %in% subs1)
+colnames(beh1) <- sub("_all", "", colnames(beh1))
+beh2 <- filter(beh2, subjects %in% subs2)
+
+behaviour <- rbind(beh1, beh2) #pull out relevant variables first
+
+
+## write text files for CCAs
+# CCAall <- behaviour %>% dplyr::select(subjects, diagnosis, sex, site, ageyrs, fsiq, rrb_css, sa_css, css_total,
+#                                srs_tscore_combined, ssp_total, rbs_total,
+#                         vabsdscoresc_dss, vabsdscoresd_dss, vabsdscoress_dss, vabsabcabc_standard)
+# CCAall$diagnosis[CCAall$diagnosis == "ASD"] <- 2
+# CCAall$diagnosis[CCAall$diagnosis == "Control"] <- 1
+# CCAall$site <- as.numeric(as.factor(CCAall$site))
+# CCAall$sex[CCAall$sex == "Male"] <- -1
+# CCAall$sex[CCAall$sex == "Female"] <- 1
+# CCAall[is.na(CCAall)] <- 999
+# 
+# CCAados <- CCAall %>% dplyr::select(subjects, diagnosis, sex, site, ageyrs, fsiq, rrb_css, sa_css, css_total)
+# CCAbeh <- CCAall %>% dplyr::select(subjects, diagnosis, sex, site, ageyrs, fsiq, srs_tscore_combined, ssp_total, rbs_total,
+#                         vabsdscoresc_dss, vabsdscoresd_dss, vabsdscoress_dss, vabsabcabc_standard)
+# CCAvabs <- CCAall %>% dplyr::select(subjects, diagnosis, sex, site, ageyrs, fsiq,
+#                         vabsdscoresc_dss, vabsdscoresd_dss, vabsdscoress_dss, vabsabcabc_standard)
+# CCAsrs_ssp_rbs <- CCAall %>% dplyr::select(subjects, diagnosis, sex, site, ageyrs, fsiq,
+#                                         srs_tscore_combined, ssp_total, rbs_total)
+#CCAados_vabs <- CCAall %>% dplyr::select(subjects, diagnosis, sex, site, ageyrs, fsiq, rrb_css, sa_css, css_total,
+#                        vabsdscoresc_dss, vabsdscoresd_dss, vabsdscoress_dss, vabsabcabc_standard)
+
+
+#CCAbase <- "/project/3022035.03/LEAP_long/stats/CCA/CCA_"
+# write.table(CCAados, file= paste0(CCAbase,"ADOS.txt"), row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+# write.table(CCAvabs, file= paste0(CCAbase,"VABS.txt"), row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+# write.table(CCAbeh, file= paste0(CCAbase,"SRS_SSP_RBS_VABS.txt"), row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+# write.table(CCAsrs_ssp_rbs, file= paste0(CCAbase,"SRS_SSP_RBS.txt"), row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+#write.table(CCAados_vabs, file= paste0(CCAbase,"ADOS_VABS.txt"), row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+
+subs <- c(subs1, subs2)
+
+course <- as.data.frame(t(read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/",LICA, "/subjectCoursesOut.txt"))))
+mod_contrib <- read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/", LICA, "/Modality_contributions.txt"))
+colnames(mod_contrib) <- sub("V", "IC", colnames(mod_contrib))
+mod_order <- read.table(paste0("/project/3022035.03/LEAP_long/data/flica_output/",LICA, "/order_of_loaded_data.txt"), stringsAsFactors=FALSE)
+
+colnames(course) <- sub("V", "IC", colnames(course)) 
+bind <- cbind(subs, course)  
+
+#set subject_IDs as colnames to plot individual subject contribution to individual ICs
+subj_contrib_to_ICs <- bind
+ sub_ls <- subj_contrib_to_ICs[1:499,1]
+ subj_contrib_to_ICs <- subj_contrib_to_ICs[-1]
+ rownames(subj_contrib_to_ICs) = make.names(sub_ls, unique=TRUE)
+ 
+ loop.vector <- colnames(subj_contrib_to_ICs)
+ 
+ # for (i in loop.vector) {
+ #    x <- subj_contrib_to_ICs[,i]
+ #    sort() #sort by site, maybe switch to ggplot to color by site without sorting
+ #    plot(x, main = i)
+ # }
+
+
+
+#create table with max and min dominance with according 
+
+# largest_dominance <- rownames(subj_contrib_to_ICs)[apply(subj_contrib_to_ICs,2,which.max)]
+# lowest_dominance <- rownames(subj_contrib_to_ICs)[apply(subj_contrib_to_ICs,2,which.min)]
+# MaxDomVal <- sapply(subj_contrib_to_ICs, max, na.rm = TRUE)
+# MinDomVal <- sapply(subj_contrib_to_ICs, min, na.rm=TRUE)
+# AvgDomVal <- sapply(subj_contrib_to_ICs, mean, na.rm = TRUE)
+# SDDomVal <- sapply(subj_contrib_to_ICs, sd, na.rm=TRUE)
+# occurence_MostDomSubj <- table(largest_dominance)
+# occurence_MinDomSubj <- table(lowest_dominance)
+
+# Dominance_table <- rbind(largest_dominance, MaxDomVal, lowest_dominance, MinDomVal, AvgDomVal, SDDomVal)
+# 
+# Dominance_table
+
+bind$timepoint <- behaviour$timepoint
+
+data <- merge(behaviour, bind, by.x=c("subjects","timepoint"), by.y=c("subs", "timepoint")) #%>% 
+ # merge(sensory, by="subjects", all.x = TRUE)
+raw <- data
+
+## quick check of subject dominance
+IC_table <- apply(abs(course), 2, function(x) max(x)/sum(x)) %>% plot
+dom_names <- apply(abs(course), 2, function(x) max(x)/sum(x)) %>% .[. > 0.05] %>% names()  ### this threshold needs to change depending on if it's a noise est with lambda dims o or R
+
+
+#lapply(bind[, dom_names], function(x) bind %>% filter(x == max(abs(x)) | x == -max(abs(x))) %>% dplyr::select(subs)) %>% unlist()
+
+```
+
+```{r explore mod contributions}
+mod_order <- mod_order %>% separate(V1, c(NA,NA,NA,NA,NA,NA,NA, "mod",NA), sep="/")
+
+colnames(mod_contrib) <- sub("V", "IC", colnames(mod_contrib)) 
+
+#calculate multmodal index
+mami2 <- function(x) {
+  #input: vector size numer of modalities, adding till 1 (for example: contributions weights in FLICA)
+  # output: Maarten and Alberto MultiModal Indexes: 
+  #      MMI: 1/2N-1 unimodal, 1 balanced multimodality
+  #      MAMI: Sigmoidal transform of value in [1/2N-1, 1] to [0 1].
+  #examples 
+  # x= [1 0 0 0 0 0];[MAMI]=mami2(x)
+  # x= (1/6) * ones(1,6);[MAMI]=mami2(x)
+  #x=rand(1,6);x=x/sum(x);[MAMI]=mami2(x)
+  N <- length(x); # number of modalitites
+  score <- max(x)-(1/N)
+  mx <- 1-(1/N)
+  MAMI <- 1-( (score)/(mx) ) # MAMI lives in [0, 1]
+  return(MAMI)
+}
+
+mami <- sapply(mod_contrib, function(x) mami2(x)) %>% as.data.frame() %>% rename(MMI = ".")
+mami$comp <- rownames(mami)
+
+mod_contrib <- cbind(mod_contrib, mod_order)
+mod_gather <- mod_contrib %>% gather(comp, contrib, -mod)
+
+fig_mami <- mami %>% mutate(comp = fct_relevel(comp, 
+                                               paste0("IC", 1:nrow(mami)))) %>%
+  ggplot(aes(x = comp, y=1, fill=MMI)) +
+  geom_bar(position="stack", stat="identity") + coord_flip() +
+  scale_fill_gradient(low = "white", high="black", limits = c(0,1),breaks= c(0, 0.5,1), expand = c(0, 0)) +
+  theme(text=element_text(family="Arial"),
+        axis.text=element_blank(),
+        axis.title=element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "left", 
+        panel.grid = element_blank(),
+        panel.border = element_blank())
+
+fig_mod_contrib <- mod_gather %>% mutate(comp = fct_relevel(comp, 
+                                                            paste0("IC", 1:nrow(mami))))  %>% ggplot(aes(fill=mod, y=contrib, x=comp)) + 
+  geom_bar(position="stack", stat="identity") + coord_flip() + ylab("contribution") + xlab("component number") +
+  theme(text=element_text(family="Arial"), legend.title = element_blank(), axis.text.y = element_text(size = 7)) +
+  scale_fill_brewer(palette="Set3")
+
+fig_mod_contrib_mmi <- plot_grid(fig_mami, fig_mod_contrib, rel_widths = c(0.18, 0.9), align='h', ncol=2)
+
+fig_mod_contrib_mmi
+
+fig_mod_contrib_file <- file.path(outdir, "mod_contrib.png")
+#ggsave(fig_mod_contrib_file, fig_mod_contrib_mmi, dpi=300, width=16, height = 18, units = "cm")
+
+```
+
+```{r find and keep multimodal IC}
+
+multi <- mod_contrib[,!sapply(mod_contrib, function(x) max(x))>0.5] %>% cbind(mod_order)
+multiICs <- multi %>% dplyr::select(-mod) %>% names()
+
+multi_gather <- multi %>% gather(comp, contrib, -mod)
+
+fig_mod_contrib_multi <- multi_gather %>% mutate(comp = fct_relevel(comp, multiICs)) %>%
+  ggplot(aes(fill=mod, y=contrib, x=comp)) + 
+  geom_bar(position="stack", stat="identity") + coord_flip() + ylab("contribution") + xlab("component number") +
+  theme(text=element_text(family="Arial"), legend.title = element_blank()) +
+  scale_fill_brewer(palette="Set3")
+
+fig_mod_contrib_multi
+
+fig_mod_contrib_multi_file <- file.path(outdir, "mod_contrib_multi.png")
+
+ggsave(fig_mod_contrib_multi_file, fig_mod_contrib_multi, dpi=300)
+
+### combining feature contribs from within a data modalitly
+mod_contrib_compressed <- mod_contrib
+mod_contrib_compressed <- mod_contrib_compressed %>% separate(mod, c(NA,"mod2"), sep="_", remove = FALSE)
+mod_contrib_compressed$mod2[mod_contrib_compressed$mod == "VBM"] <- "VBM"
+mod_contrib_compressed$mod2[mod_contrib_compressed$mod2 == "G1"] <- "grad"
+mod_contrib_compressed$mod2[mod_contrib_compressed$mod2 == "G2"] <- "grad"
+mod_contrib_compressed <- dplyr::select(mod_contrib_compressed, -mod)
+mod_contrib_compressed <- aggregate(. ~ mod2, mod_contrib_compressed, sum)
+
+mod2 <- mod_contrib_compressed$mod2 
+multi_simp <- mod_contrib_compressed[,!sapply(mod_contrib_compressed, function(x) max(x))>0.7] %>% cbind(mod2)
+multiICs_simp <- multi_simp %>% dplyr::select(-mod2) %>% names()
+
+multi_gather_simp <- multi_simp %>% gather(comp, contrib, -mod2)
+
+fig_mod_contrib_multi_simp <- multi_gather_simp %>% mutate(comp = fct_relevel(comp, multiICs_simp)) %>%
+  ggplot(aes(fill=mod2, y=contrib, x=comp)) + 
+  geom_bar(position="stack", stat="identity") + coord_flip() + ylab("contribution") + xlab("component number") +
+  theme(text=element_text(family="Arial"), legend.title = element_blank()) +
+  scale_fill_brewer(palette="Set3")
+
+fig_mod_contrib_multi_simp
+
+fig_mod_contrib_multi_simp_file <- file.path(outdir, "mod_contrib_multi_compressed.png")
+
+#ggsave(fig_mod_contrib_multi_simp_file, fig_mod_contrib_multi_simp, dpi=300)
+
+``` 
+
+```{r define funcs}
+extract_lm <- function(i, mcc){ 
+  #Est <- lapply((i), function(f) summary(f)$"coefficients"[2,1]) %>% unlist()
+  Fval <- lapply((i), function(f) Anova(f)$"F value"[1])  %>% unlist()
+  beta <- lapply((i), function(f) lm.beta(f)[1]) %>% unlist()
+  p <-lapply((i), function(f) Anova(f)$"Pr(>F)"[1])  %>% unlist()
+  #padj <- p.adjust(p, method="fdr", n=mcc)
+  
+  merged <- as.data.frame(cbind(Fval, p, beta))
+  return(merged)
+}
+
+all_stats_lm <- function(x, df){
+  mods  <- lapply(ICs, function(i){
+    lm(get(i) ~ get(x) + ageyrs + sex + site + timepoint, data=df,na.action = na.omit)
+  })
+  stats <- extract_lm(mods)
+  stats$IC <- ICs
+  stats_wide <- pivot_wider(stats, names_from = IC, values_from = c("Fval","p", "beta"))
+  stats_wide$behaviour <- x
+  return(stats_wide)
+}
+
+extract_cor <- function(i){ 
+  r <- lapply((i), function(f) (f)$estimate)  %>% unlist()
+  p <- lapply((i), function(f) (f)$p.value)  %>% unlist()
+  
+  merged <- as.data.frame(cbind(r, p))
+  return(merged)
+}
+
+all_stats_cor <- function(x){
+  mods  <- lapply(ICs, function(i){
+    cor.test(as.numeric(data[[ x ]]), as.numeric(data[[ i ]]))
+  })
+  stats <- extract_cor(mods)
+  stats$IC <- ICs
+  stats_wide <- pivot_wider(stats, names_from = IC, values_from = c("r","p"))
+  stats_wide$behaviour <- x
+  return(stats_wide)
+}
+
+sig_tables <- function(x,df,stat){
+  var_name <- rownames(df)
+  tbl <- df %>% dplyr::select(ends_with(x)) %>% cbind(var_name) %>% filter(.[2] <0.05) %>% arrange(desc(.[[1]])) 
+  tbl[1] <- round(tbl[1], 2)
+  tbl[2] <- round(tbl[2], 4) %>% format(nsmall =4)
+  table <- kable(tbl, col.names = c(stat, "p", "behaviour/demographic"), escape=FALSE,  ## not always a beta!
+                 align = c("c", "c", "l")) %>% kable_styling(bootstrap_options = c("hover", "condensed"), 
+                                                             full_width = F, position = "left")
+  
+  #table <- tableGrob(tbl, cols = c("r", "p", "behaviour/demographic"), theme = ttheme_minimal(), rows = NULL)
+  
+  tbl_file <- paste0(x, "tbl.png")
+  save_kable(table, file=tbl_file)
+  #ggsave(tbl_file, table)
+  return(table)
+}
+
+
+indiv_IC_contrib_fig <- function(x){
+  df <- mod_contrib_sig_gath %>% filter(comp == x)
+  fig <- ggplot(df, aes(fill=mod, y=contrib, x=comp)) + 
+    geom_bar(position="stack", stat="identity") + coord_flip() + 
+    theme(text=element_text(family="Arial"), legend.position="none", axis.title.y = element_blank()) +
+    scale_fill_brewer(palette="Set3")
+  fig_file <- file.path(outdir, paste0(x,"_mod_contrib.png"))
+  ggsave(fig_file, fig, dpi=300, width=12, height = 4, units = "cm")
+  return(fig)
+}
+
+```
+
+```{r wrangling interpolating}
+ICs <- mod_contrib %>% dplyr::select(-mod) %>% names() #all ICs 
+#ICs <- mod_contrib %>% dplyr::select(-mod,-IC80) %>% names() #all ICs expect for IC80, because it is only NAs - ONLY for congrads only, because IC80 is all NAs
+#ICs <- c("IC1", "IC2", "IC3", "IC4", "IC5", "IC6","IC7","IC8","IC9","IC10")
+#ICs <- c("IC6", "IC7", "IC8", "IC9", "IC10")
+#ICs <- c("IC11","IC12","IC13","IC14","IC15","IC16","IC17","IC18","IC19","IC20")
+#ICs <- multi %>% dplyr::select(-mod) %>% names()# ICs with multimodal condtributions
+#ICs <- multi_simp %>% dplyr::select(-type) %>% names()# ICs with multimodal condtributions if features from different modalities are collapsed
+#ICs <- c("IC10", "IC32", "IC45", "IC79") # VBM_DWI_congrads -VBM ICs with highest spatial correlation to IC10 and 14 in the VBM analysis from Ting
+#ICs <- c("IC37", "IC42","IC60", "IC62") # these 4 have the highest spatial correlation with IC10 and 14 in the VBM analysis from Ting
+```
+
+```{r prep data}
+
+#remove subs missing fsiq
+#data <- data %>% filter(!is.na(fsiq))
+data$subjects <- as.factor(data$subjects)
+
+#alternative subsets
+if (type == "indiv"){
+  data <- distinct(data, subjects, .keep_all = TRUE)
+} else if (type == "long"){
+  indiv <- distinct(data, subjects, .keep_all = TRUE)
+  repsT2 <- anti_join(data, indiv)
+  repsubs <- repsT2$subjects
+  repsT1 <- filter(indiv, subjects %in% repsubs)
+  data <- rbind(repsT1, repsT2)
+}
+
+core_ls <- c("css_total", "rrb_css", "sa_css")
+beh_ls <- c("srs_tscore_combined", "ssp_total", "rbs_total")
+vine_ls <- c("vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard")
+
+#normalise data
+dataASD <- data %>% filter(diagnosis == "ASD")
+dataASD %<>%
+  dplyr::select(all_of(beh_ls), all_of(vine_ls), all_of(core_ls), all_of(ICs), fsiq, ageyrs,
+                diagnosis, sex, site, subjects, timepoint) %>%
+  mutate(across(!c(diagnosis, sex, site, subjects, timepoint), scale))
+
+data %<>%
+  dplyr::select(all_of(beh_ls), all_of(vine_ls), all_of(core_ls), all_of(ICs), fsiq, ageyrs,
+                diagnosis, sex, site, subjects, timepoint) %>%
+  mutate(across(!c(diagnosis, sex, site, subjects, timepoint), scale)) #adi_ls removed as it was excluded
+
+
+ASDt1data <- data %>% filter(diagnosis =="ASD") %>% filter(timepoint =="t1")
+ASDt2data <- data %>% filter(diagnosis =="ASD") %>% filter(timepoint =="t2")
+CTRLt1data <- data %>% filter(diagnosis =="Control") %>% filter(timepoint =="t1")
+CTRLt2data <- data %>% filter(diagnosis =="Control") %>% filter(timepoint =="t2")
+
+ASDt1subs <- as.data.frame(ASDt1data[,"subjects"])
+colnames(ASDt1subs) <- c("subjects")
+ASDt2subs <- as.data.frame(ASDt2data[,"subjects"])
+colnames(ASDt2subs) <- c("subjects")
+CTRLt1subs <- as.data.frame(CTRLt1data[,"subjects"])
+colnames(CTRLt1subs) <- c("subjects")
+CTRLt2subs <- as.data.frame(CTRLt2data[,"subjects"])
+colnames(CTRLt2subs) <- c("subjects")
+
+ASDt1subs_file<- paste0("/project/3022035.03/LEAP_long/demogs", "/", "ASD_t1_sbjs.txt")
+write.csv (ASDt1subs, ASDt1subs_file, row.names = F)
+ASDt2subs_file<- paste0("/project/3022035.03/LEAP_long/demogs", "/", "ASD_t2_sbjs.txt")
+write.csv (ASDt2subs, ASDt2subs_file, row.names = F)
+CTRLt1subs_file<- paste0("/project/3022035.03/LEAP_long/demogs", "/", "CTRL_t1_sbjs.txt")
+write.csv (CTRLt1subs, CTRLt1subs_file, row.names = F)
+CTRLt2subs_file<- paste0("/project/3022035.03/LEAP_long/demogs", "/", "CTRL_t2_sbjs.txt")
+write.csv (CTRLt2subs, CTRLt2subs_file, row.names = F)
+
+```
+
+```{r stats}
+# extract_lmer <- function(i){ 
+#   Est <- lapply((i), function(f) summary(f)$"coefficients"[2,1]) %>% unlist()
+#   Chi <- lapply((i), function(f) Anova(f)$"Chisq"[1])  %>% unlist()
+#   p <-lapply((i), function(f) Anova(f)$"Pr(>Chisq)"[1])  %>% unlist()
+#   #padj <- p.adjust(p, method="fdr")
+#   #beta <- lapply((i), function(f) lm.beta(f)[1]) %>% unlist()
+#   merged <- as.data.frame(cbind(Est, Chi, p))
+#   return(merged)
+# }
+# 
+# all_stats_lmer <- function(x, data){
+#   mods  <- lapply(ICs, function(i){
+#     lmer(get(i) ~ get(x) + ageyrs + sex + site +timepoint + (1 | subjects), data=data)
+#   })
+#   stats <- extract_lmer(mods)
+#   stats$IC <- ICs
+#   stats_wide <- pivot_wider(stats, names_from = IC, values_from = c("Est","Chi","p"))
+#   stats_wide$behaviour <- x
+#   return(stats_wide)
+# }
+
+extract_lme <- function(i){ 
+  Est <- lapply((i), function(f) summary(f)$"tTable"[2,1]) %>% unlist()
+  t <- lapply((i), function(f) summary(f)$"tTable"[2,4])  %>% unlist()
+  p <-lapply((i), function(f) Anova(f)$"Pr(>Chisq)"[1])  %>% unlist()
+  merged <- as.data.frame(cbind(Est, t, p))
+  return(merged)
+}
+
+#Note: lme optimizer is frail and must be changed to avoid convergence error. options: all - optim | all but congrads - nlminb
+all_stats_lme <- function(x, data){
+  mods  <- lapply(ICs, function(i){
+    form <- formula(paste0(i,"~", x, "+ ageyrs + sex + site + timepoint")) ##### + fsiq  #### need to add and check effect
+    mod <- lme(fixed=form,random = ~1 | subjects, data=data, na.action = na.omit, control = lmeControl(opt = 'optim', msMaxIter=150))
+    mod$call$fixed <- form
+    mod
+  })
+  stats <- extract_lme(mods)
+  stats$IC <- ICs
+  stats_wide <- pivot_wider(stats, names_from = IC, values_from = c("Est","t","p"))
+  stats_wide$behaviour <- x
+  return(stats_wide)
+}
+
+if (type == "all" | type == "long"){
+  #case control diff + associations within asd group
+  Stats_dx <- all_stats_lme("diagnosis", data)
+  
+  #associations within ASD group
+  Stats_beh <- lapply(beh_ls, all_stats_lme, data)
+  Stats_core <- lapply(core_ls, all_stats_lme, dataASD)
+  #Stats_vine <- lapply(vine_ls, all_stats_lme, data)
+  Stats_vine <- lapply(vine_ls, all_stats_lme, dataASD)
+  
+} else if (type == "indiv") {
+  #case control diff + associations within asd group
+  Stats_dx <- all_stats_lm("diagnosis", data)
+  
+  #associations within ASD group
+  Stats_beh <- lapply(beh_ls, all_stats_lm, data)
+  Stats_core <- lapply(core_ls, all_stats_lm, dataASD)
+  #Stats_vine <- lapply(vine_ls, all_stats_lm, data)
+  Stats_vine <- lapply(vine_ls, all_stats_lm, dataASD)
+}
+
+
+Stats_b <- as.data.frame((do.call(rbind, Stats_beh))) 
+Stats_c <- as.data.frame((do.call(rbind, Stats_core)))
+Stats_v <- as.data.frame((do.call(rbind, Stats_vine)))
+#Stats_v_ASD <- as.data.frame((do.call(rbind, Stats_vine_ASD)))
+
+Stats <- rbind(Stats_b, Stats_c, Stats_v, Stats_dx)
+#Stats <- rbind(Stats_b, Stats_dx)
+Stats_p <- Stats %>% dplyr::select(starts_with("p_")) %>% t() %>% as.data.frame()
+colnames(Stats_p) <- Stats$behaviour
+
+#unadj
+Stats_p_unadj <- t(Stats_p) %>% as.data.frame()
+Stats_sig_unadj <- Stats_p_unadj[, which(apply(Stats_p_unadj, 2, function(x) any(x<0.05))), drop=FALSE]
+
+sig_names_p_unadj <- names(Stats_sig_unadj)
+sig_ICs_unadj <- sub("p_","", sig_names_p_unadj)
+
+if (type == "all" | type == "long"){
+  sig_names_Est_unadj <- sub("p_","Est_", sig_names_p_unadj)
+  } else if (type == "indiv") {
+  sig_names_Est_unadj <- sub("p_","beta_", sig_names_p_unadj)
+}
+
+Stats_sig_unadj <- Stats %>% dplyr::select(all_of(sig_names_Est_unadj)) %>% cbind(Stats_sig_unadj)
+
+Stats_sig_unadj_file <- paste0(outdir, "/" ,type,"_sig_ICs_unadj.csv")
+write.csv(Stats_sig_unadj, Stats_sig_unadj_file, row.names = T)
+
+lapply(sig_ICs_unadj, sig_tables, Stats_sig_unadj, "coefficient")
+
+
+# full_mod <- lme(IC65 ~ vabsabcabc_standard*site + ageyrs+ sex +timepoint, random = ~1 | subjects, data=data, na.action = na.omit)
+# Anova(full_mod)
+# summary(full_mod)
+
+# 
+#full_mod <- lme(IC42 ~ diagnosis*site + ageyrs+ sex +timepoint, random = ~1 | subjects, data=data, na.action = na.omit)
+#Anova(full_mod)
+
+
+```
+
+
+```{r MCC}
+#for dx only
+Stats_p_dx <- Stats_dx %>% dplyr::select(starts_with("p_")) %>% t() %>% as.data.frame()
+colnames(Stats_p_dx) <- Stats_dx$behaviour
+
+Stats_p_cor_dx <- Stats_p_dx %>% 
+  as.matrix %>% 
+  as.vector %>% 
+  p.adjust(method='fdr') %>% 
+  matrix(ncol=ncol(Stats_p_dx)) %>%
+  as.data.frame()
+
+rownames(Stats_p_cor_dx) <- rownames(Stats_p_dx)
+colnames(Stats_p_cor_dx) <- colnames(Stats_p_dx)
+
+Stats_p_dx <- t(Stats_p_cor_dx) %>% as.data.frame()
+Stats_sig_dx <- Stats_p_dx[, which(apply(Stats_p_dx, 2, function(x) any(x<0.05))), drop=FALSE]
+
+sig_names_p_dx <- names(Stats_sig_dx)
+sig_names_Est_dx <- sub("p_","Est_", sig_names_p_dx)
+sig_ICs_dx <- sub("p_","", sig_names_p_dx)
+
+Stats_sig_dx <- Stats_dx %>% dplyr::select(all_of(sig_names_Est_dx)) %>% cbind(Stats_sig_dx)
+
+Stats_sig_file_dx <- paste0(outdir,"/", type ,"_sig_ICs_adj_fdr_dx.csv")
+write.csv(Stats_sig_dx, Stats_sig_file_dx, row.names = T)
+
+lapply(sig_ICs_dx, sig_tables, Stats_sig_dx, "coefficient")
+
+
+#for all other variables tested
+Stats_nodx <- rbind(Stats_b, Stats_c, Stats_v)
+Stats_p_nodx <- Stats_nodx %>% dplyr::select(starts_with("p_")) %>% t() %>% as.data.frame()
+colnames(Stats_p_nodx) <- Stats_nodx$behaviour
+
+Stats_p_cor_nodx <- Stats_p_nodx %>% 
+  as.matrix %>% 
+  as.vector %>% 
+  p.adjust(method='fdr') %>% 
+  matrix(ncol=ncol(Stats_p_nodx)) %>%
+  as.data.frame()
+
+rownames(Stats_p_cor_nodx) <- rownames(Stats_p_nodx)
+colnames(Stats_p_cor_nodx) <- colnames(Stats_p_nodx)
+
+Stats_p_nodx <- t(Stats_p_cor_nodx) %>% as.data.frame()
+Stats_sig_nodx <- Stats_p_nodx[, which(apply(Stats_p_nodx, 2, function(x) any(x<0.05))), drop=FALSE]
+
+sig_names_p_nodx <- names(Stats_sig_nodx)
+sig_names_Est_nodx <- sub("p_","Est_", sig_names_p_nodx)
+sig_ICs_nodx <- sub("p_","", sig_names_p_nodx)
+
+Stats_sig_nodx <- Stats_nodx %>% dplyr::select(all_of(sig_names_Est_nodx)) %>% cbind(Stats_sig_nodx)
+
+Stats_sig_file_nodx <- paste0(outdir,"/", type, "_sig_ICs_adj_fdr_nodx.csv")
+write.csv(Stats_sig_nodx, Stats_sig_file_nodx, row.names = T)
+
+lapply(sig_ICs_nodx, sig_tables, Stats_sig_nodx, "coefficient") # this works when knitting as root dir is set but get error/or writes to home dir when running the chunk as save_kable wants relative path but setwd() doesn't work
+
+```
+
+
+
+
+```{r}
+#check modality loadings for sig ICs
+sig_ICs <- sig_ICs_unadj
+#sig_ICs <- sig_ICs_dx
+#sig_ICs <- sig_ICs_nodx
+
+mod_contrib_sig <- mod_contrib %>% dplyr::select(sig_ICs) %>% cbind(mod_order)
+mod_contrib_sig_gath <- mod_contrib_sig %>% gather(comp, contrib, -mod)
+
+fig_mod_contrib_sig <- mod_contrib_sig_gath %>% mutate(comp = fct_relevel(comp, sig_ICs)) %>% 
+  ggplot(aes(fill=mod, y=contrib, x=comp)) + xlab("component number") + ylab("contribution") +
+  geom_bar(position="stack", stat="identity") + coord_flip() + 
+  theme(text=element_text(family="Arial"),
+        legend.title = element_blank()) +
+  scale_fill_brewer(palette="Set3")
+
+fig_mod_contrib_sig
+
+fig_mod_contrib_sig_file <- file.path(outdir, type ,"_mod_contrib_sig.png")
+#ggsave(fig_mod_contrib_sig_file, fig_mod_contrib_sig, dpi=300, width=12, height = 8, units = "cm")
+
+#mk contrib figure for each sig IC
+figs <- lapply(sig_ICs, indiv_IC_contrib_fig)
+
+#grid.arrange(figs[[1]], tables[[1]])
+
+```
+
+```{r put table and contrib together}
+
+ICfig_tbl <- function(x, Stats_sig){
+  var_name <- rownames(Stats_sig)
+  tbl <- Stats_sig %>% dplyr::select(ends_with(x)) %>% cbind(var_name) %>% filter(.[2] <0.05) %>% arrange(desc(.[[1]])) 
+  tbl[1] <- round(tbl[1], 2)
+  tbl[2] <- round(tbl[2], 4) %>% format(nsmall =4, scientific=FALSE)
+  # table <- kable(tbl, col.names = c("r", "p", "behaviour/demographic"),
+  #                   align = c("c", "c", "l")) %>% kable_styling(bootstrap_options = c("hover", "condensed"), 
+  #                                                              full_width = F, position = "left")
+  
+  table <- tableGrob(tbl, cols = c("coefficient", "p", "behaviour/demographic"), 
+                     theme = ttheme_minimal(core = list(fg_params = list(hjust = 0, x=0.1), padding =unit(c(2,2), "mm"),
+                                                        colhead = list(fg_params = list(hjust=0, x=0.1)))),
+                     rows = NULL)
+  
+  df <- mod_contrib_sig_gath %>% filter(comp == x)
+  fig <- ggplot(df, aes(fill=mod, y=contrib, x=comp)) + 
+    geom_bar(position="stack", stat="identity") + coord_flip() + ylab("feature contribution") +
+    theme(text=element_text(family="Arial"), legend.position="right", legend.title = element_blank(),
+          legend.text = element_text(size = 8), legend.key.size = unit(0.3, "cm"), axis.title.y = element_blank()) +
+    scale_fill_brewer(palette="Set3")
+  
+  fig_noleg <- ggplot(df, aes(fill=mod, y=contrib, x=comp)) + 
+    geom_bar(position="stack", stat="identity") + coord_flip() + ylab("feature contribution") +
+    theme(text=element_text(family="Arial"), legend.position="none", axis.title.y = element_blank()) +
+    scale_fill_brewer(palette="Set3")
+  
+  fig_file <- file.path(outdir, paste0(x,"_mod_contrib.png"))
+  ggsave(fig_file, fig_noleg, dpi=300, width=10, height = 4, units = "cm")
+  
+  p <- plot_grid(table, fig, ncol = 1, labels=c('A', 'B'), label_size=8, rel_heights = c(3, 1))
+  
+  #ggdraw() + draw_plot( plot = table, x = 0, y = 0.5, width = 1, height = 0.5 ) +
+  # draw_plot( plot = fig, x = 0, y = 0, width = 1, height = 0.5 )
+  
+  # now add the title
+  title <- ggdraw() + 
+    draw_label(x,
+               fontface = 'bold',
+               size= 14,
+               x = 0,
+               hjust = 0
+    ) +
+    theme(
+      # add margin on the left of the drawing canvas,
+      # so title is aligned with left edge of first plot
+      plot.margin = margin(0, 0, 0, 5)
+    )
+  p_title <- plot_grid(
+    title, p, ncol = 1,
+    # rel_heights values control vertical title margins
+    rel_heights = c(0.08, 1)
+  )
+  
+  #p_file <- file.path(outdir, paste0(x,"_tbl_contrib.png"))
+  #ggsave(p_file, p_title, dpi=300, width=10, height = 10, units = "cm")
+  return(p)
+}
+
+lapply(sig_ICs, ICfig_tbl, Stats_sig_unadj) #dataframe may change, always check this ##
+
+```
+
+```{r heatmap}
+#some org stuff to make it prettier
+nicer_names <- data.frame(old_name = c("srs_tscore_combined", "ssp_total", "rbs_total", 
+                                       "css_total", "rrb_css", "sa_css", 
+                                       "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard",
+                                       "diagnosis"),
+                 sub_scale = c("SRS", "SSP", "RBS", 
+                               "Total", "RRB", "SA", 
+                                       "Communication", "Daily living", "Socialisation", "Composite",
+                                      "diagnosis"),
+                 scale = c("", "", "", 
+                               "ADOS", "ADOS", "ADOS", 
+                                       "VABS", "VABS", "VABS", "VABS",
+                                       ""))
+
+# filter to only keep behaviours with at least one sig association
+Stats_sigIC <- Stats_p[, which(apply(Stats_p, 2, function(x) any(x<0.05))), drop=FALSE]
+sigP <- Stats_sigIC[which(apply(Stats_sigIC, 1, function(x) any(x<0.05))), drop=FALSE,] %>% t() %>% as.data.frame()
+
+beh_sig <- rownames(sigP)
+
+sigB <- Stats %>% dplyr::select(sig_names_Est_unadj) 
+rownames(sigB) <- Stats$behaviour
+sigB <- subset(sigB, rownames(sigB) %in% beh_sig)
+
+#threshold beta values based on ps
+sigB[sigP>0.05] <- NA
+
+colnames(sigB) <- sub("Est_", "", colnames(sigB))
+sigB$var_names <- rownames(sigB)
+sigB_gath <- sigB %>% gather("comp", "coefficient", -var_names)
+sigB_gath <- sigB_gath %>% merge(nicer_names, by.x="var_names", by.y="old_name")
+
+colnames(sigP) <- sub("p_", "", colnames(sigP))
+sigP$var_names <- rownames(sigP)
+sigP_gath <- sigP %>% gather("comp", "p", -var_names)
+sigP_gath <- sigP_gath %>% merge(nicer_names, by.x="var_names", by.y="old_name")
+
+sig_gath <- merge(sigB_gath, sigP_gath, by = c("var_names", "comp", "scale", "sub_scale"))
+sig_gath$plevel <- NA
+sig_gath$plevel[sig_gath$p < 0.001] <- "*"
+
+fig_heat <- sig_gath %>% mutate(comp = fct_relevel(comp, sig_ICs_unadj)) %>%
+  ggplot( aes(fill=coefficient, x=comp, y=interaction(sub_scale, scale))) +
+  geom_tile(aes(fill = coefficient, width=0.9, height=0.9)) + theme(text=element_text(family="Arial", size =9),
+                                                             axis.text.x = element_text(angle = 45, hjust= 0.2), 
+                                                             axis.ticks = element_blank(),
+                                                             legend.text = element_text(size = 8), 
+                                                             legend.key.size = unit(0.3, "cm")) +
+  scale_fill_gradient2(low="blue", mid="white", high="red", midpoint=0, limits =c(-0.4, 0.4), na.value = "#CCCCCC",oob = scales::squish) +
+  labs(x="", y="") + scale_x_discrete(position = "top") +
+scale_y_discrete(limits=rev, guide = "axis_nested") + theme(ggh4x.axis.nestline = element_line(linetype = 1, colour = "red")) +
+  geom_text(aes(label=plevel)) 
+
+fig_heat_file <- file.path(outdir, "sig_unadj_heatmap.png")
+ggsave(fig_heat_file, fig_heat, dpi=300, width=12, height = 8, units = "cm")
+
+fig_heat
+
+fig_mod_contrib <- mod_gather %>% filter(comp %in% sig_ICs_unadj) %>% mutate(comp = fct_relevel(comp, sig_ICs_unadj)) %>%
+  ggplot(aes(fill=mod, y=contrib, x=comp)) +  scale_x_discrete(position = "top") +
+  geom_bar(position="stack", stat="identity") + ylab("contribution") + xlab("") +
+  theme(text=element_text(family="Arial", size =9),
+                                                             axis.text.x = element_text(angle = 45, hjust= 0.2), 
+                                                             axis.ticks = element_blank(),
+                                                             legend.text = element_text(size = 8), 
+                                                              legend.title = element_blank(),
+                                                             legend.key.size = unit(0.3, "cm"), axis.text.y = element_text(size = 7)) +
+  scale_fill_brewer(palette="Set3")
+
+fig_heat_contrib <- plot_grid(fig_heat, fig_mod_contrib, ncol = 1,
+    # rel_heights values control vertical title margins
+    rel_heights = c(1, 0.4), align = 'hv')
+
+fig_heat_contrib_file <- file.path(outdir, "sig_unadj_heatmap_contrib.png")
+#ggsave(fig_heat_contrib_file, fig_heat_contrib, dpi=300, width=16, height = 16, units = "cm")
+
+```
+
+```{r} 
+
+GeomSplitViolin <- ggproto("GeomSplitViolin", GeomViolin, draw_group = function(self, data, ..., draw_quantiles = NULL){
+  data <- transform(data, xminv = x - violinwidth * (x - xmin), xmaxv = x + violinwidth * (xmax - x))
+  grp <- data[1,'group']
+  newdata <- plyr::arrange(transform(data, x = if(grp%%2==1) xminv else xmaxv), if(grp%%2==1) y else -y)
+  newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
+  newdata[c(1,nrow(newdata)-1,nrow(newdata)), 'x'] <- round(newdata[1, 'x']) 
+  if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+    stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <= 
+                                              1))
+    quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
+    aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
+    aesthetics$alpha <- rep(1, nrow(quantiles))
+    both <- cbind(quantiles, aesthetics)
+    quantile_grob <- GeomPath$draw_panel(both, ...)
+    ggplot2:::ggname("geom_split_violin", grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
+  }
+  else {
+    ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
+  }
+})
+geom_split_violin <- function (mapping = NULL, data = NULL, stat = "ydensity", position = "identity", ..., draw_quantiles = NULL, trim = TRUE, scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) {
+  layer(data = data, mapping = mapping, stat = stat, geom = GeomSplitViolin, position = position, show.legend = show.legend, inherit.aes = inherit.aes, params = list(trim = trim, scale = scale, draw_quantiles = draw_quantiles, na.rm = na.rm, ...))
+}
+```
+
+```{r}
+
+#######       IC65 by vineland full sample
+##IC65 - composite
+VcompositeP <- "italic(p)[unadj] == 0.004"
+fig_Vcomposite <- raw  %>% 
+  filter(! is.na(vabsabcabc_standard)) %>%
+    ggplot( aes(x=vabsabcabc_standard, y=IC65)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland composite") + geom_point(size=0.4, color= "gray") +
+     stat_smooth(method="lm", se = TRUE, size=0.5, color= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 30), 
+       axis.title = element_text(size=50, face="bold")) + ylab("IC65 subject course") + 
+#   annotate(geom="text", x=6, y=3.2, size=4, label = rbsbeta, parse =TRUE) +
+    annotate(geom="text", x=40, y=2.8, size=4, label = VcompositeP, parse =TRUE)
+fig_Vcomposite
+fig_Vcomposite_f <- file.path(outdir, "IC65vVcomposite.png")
+ggsave(fig_Vcomposite_f, fig_Vcomposite, dpi=300, width=7, height = 7, units = "cm")
+
+##IC65 - daily 
+VdailyP <- "italic(p)[unadj] == 0.009"
+fig_Vdaily <- raw  %>% 
+  filter(! is.na(vabsdscoresd_dss)) %>%
+    ggplot( aes(x=vabsdscoresd_dss, y=IC65)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland daily living") + geom_point(size=0.4, color= "gray") +
+     stat_smooth(method="lm", se = TRUE, size=0.5, color= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 30), 
+       axis.title = element_text(size=50, face="bold")) + ylab("IC65 subject course") + 
+#   annotate(geom="text", x=6, y=3.2, size=4, label = rbsbeta, parse =TRUE) +
+    annotate(geom="text", x=40, y=2.8, size=4, label = VdailyP, parse =TRUE)
+fig_Vdaily
+fig_Vdaily_f <- file.path(outdir, "IC65vVdaily.png")
+ggsave(fig_Vdaily_f, fig_Vdaily, dpi=300, width=7, height = 7, units = "cm")
+
+##IC65 - communication 
+VcommP <- "italic(p)[unadj] == 0.02"
+fig_Vcomm <- raw  %>% 
+  filter(! is.na(vabsdscoresc_dss )) %>%
+    ggplot( aes(x=vabsdscoresc_dss , y=IC65)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland communication") + geom_point(size=0.4, color= "gray") +
+     stat_smooth(method="lm", se = TRUE, size=0.5, color= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 30), 
+       axis.title = element_text(size=50, face="bold")) + ylab("IC65 subject course") + 
+#   annotate(geom="text", x=6, y=3.2, size=4, label = rbsbeta, parse =TRUE) +
+    annotate(geom="text", x=40, y=2.8, size=4, label = VcommP, parse =TRUE)
+fig_Vcomm
+fig_Vcomm_f <- file.path(outdir, "IC65vVcomm.png")
+ggsave(fig_Vcomm_f, fig_Vcomm, dpi=300, width=7, height = 7, units = "cm")
+
+
+##IC65 - composite
+VcompositeP <- "italic(p)[unadj] == 0.004"
+fig_Vcomposite <- raw  %>% 
+  filter(! is.na(vabsabcabc_standard)) %>%
+    ggplot( aes(x=vabsabcabc_standard, y=IC65)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland composite") + geom_point(size=0.4, color= "gray") +
+     stat_smooth(method="lm", se = TRUE, size=0.5, color= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 30), 
+       axis.title = element_text(size=50, face="bold")) + ylab("IC65 subject course") + 
+#   annotate(geom="text", x=6, y=3.2, size=4, label = rbsbeta, parse =TRUE) +
+    annotate(geom="text", x=40, y=2.8, size=4, label = VcompositeP, parse =TRUE)
+fig_Vcomposite
+fig_Vcomposite_f <- file.path(outdir, "IC65vVcomposite.png")
+ggsave(fig_Vcomposite_f, fig_Vcomposite, dpi=300, width=7, height = 7, units = "cm")
+
+##IC65 - daily 
+VdailyP <- "italic(p)[unadj] == 0.009"
+fig_Vdaily <- raw  %>% 
+  filter(! is.na(vabsdscoresd_dss)) %>%
+    ggplot( aes(x=vabsdscoresd_dss, y=IC65)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland daily living") + geom_point(size=0.4, color= "gray") +
+     stat_smooth(method="lm", se = TRUE, size=0.5, color= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 30), 
+       axis.title = element_text(size=50, face="bold")) + ylab("IC65 subject course") + 
+#   annotate(geom="text", x=6, y=3.2, size=4, label = rbsbeta, parse =TRUE) +
+    annotate(geom="text", x=40, y=2.8, size=4, label = VdailyP, parse =TRUE)
+fig_Vdaily
+fig_Vdaily_f <- file.path(outdir, "IC65vVdaily.png")
+ggsave(fig_Vdaily_f, fig_Vdaily, dpi=300, width=7, height = 7, units = "cm")
+
+##IC65 - communication 
+fig_VcommDX <- raw  %>% 
+  filter(! is.na(vabsdscoresc_dss )) %>%
+    ggplot( aes(x=vabsdscoresc_dss , y=IC65)) + ylim(-2,2) + xlim(25,130) +
+      xlab("Vineland communication") + geom_point(aes(colour= diagnosis, shape = diagnosis), size=0.4) +
+  scale_color_manual(values=c('black','grey'), labels = c("Autism", "Control")) +
+  scale_shape_manual(values = c(17,19), labels = c("Autism", "Control")) +
+     stat_smooth(method="lm", se = TRUE, size=0.5, colour= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 30), 
+       axis.title = element_text(size=50, face="bold"),
+       legend.position = c(0.9,0.9), legend.key.size = unit(0.5, "cm"),
+       legend.title = element_blank()) + ylab("IC65 subject course") +
+    annotate(geom="text", x=40, y=1.8, size=4, label = VcommP, parse =TRUE)
+fig_VcommDX
+fig_VcommDX_f <- file.path(outdir, "IC65vVcommDX.png")
+ggsave(fig_VcommDX_f, fig_VcommDX, dpi=300, width=7, height = 7, units = "cm")
+
+
+fig_Vine <- plot_grid(fig_VcompositeDX, fig_VdailyDX, fig_VcommDX, ncol = 3)
+fig_Vine_f <- file.path(outdir, "IC65vVall.png")
+ggsave(fig_Vine_f, fig_Vine, dpi=300, width=21, height = 7, units = "cm")
+
+```
+
+```{r}
+
+#######       IC3 by vineland by group
+##IC3 - composite
+VcompositeP = "italic(p)[unadj] == 0.004"
+fig_VcompositeDX <- raw  %>%
+  filter(! is.na(vabsabcabc_standard), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsabcabc_standard, y=IC3)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland composite") + geom_point(size=0.4) +
+    geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC3 subject course") +
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VcompositeP, parse =TRUE)
+fig_VcompositeDX_f <- file.path(outdir, "IC3vVcompositeDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VcompositeDX_f, type="png", bg="white")
+fig_VcompositeDX
+dev.off()
+#ggsave(fig_VcompositeDX_f, fig_VcompositeDX, dpi=300, width=7, height = 7, units = "cm")
+
+##IC3 - socialization
+VsocialP = "italic(p)[unadj] == 0.004"
+fig_VsocialDX <- raw %>%
+  filter(! is.na(vabsdscoress_dss), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsdscoress_dss, y=IC3)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland socialization") + geom_point(size=0.4) +
+     geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC3 subject course") +
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VsocialP, parse =TRUE)
+fig_VsocialDX_f <- file.path(outdir, "IC3vVsocialDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VsocialDX_f, type="png", bg="white")
+fig_VsocialDX
+dev.off()
+#ggsave(fig_VsocialDX_f, fig_VsocialDX, dpi=300, width=7, height = 7, units = "cm")
+
+##IC3 - daily 
+
+VdailyP = "italic(p)[unadj] == 0.0008"
+fig_VdailyDX <- raw  %>%
+  filter(! is.na(vabsdscoresd_dss), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsdscoresd_dss, y=IC3)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland daily living") + geom_point(size=0.4) +
+   geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC3 subject course")+
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VdailyP, parse =TRUE)
+fig_VdailyDX_f <- file.path(outdir, "IC3vVdailyDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VdailyDX_f, type="png", bg="white")
+fig_VdailyDX
+dev.off()
+#ggsave(file=fig_VdailyDX_f, plot=fig_VdailyDX, dpi=600, width=15, height = 15, units = "cm")
+
+##IC3 - communication 
+VcommP <- "italic(p)[unadj] == 0.03"
+fig_VcommDX <- raw  %>% 
+  filter(! is.na(vabsdscoresc_dss), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsdscoresc_dss , y=IC3)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland communication") + geom_point(size=0.4) +
+     geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold") ,
+       legend.position = c(0.9,0.9), legend.key.size = unit(0.5, "cm"),
+       legend.title = element_blank()) + ylab("IC3 subject course") +
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VcommP, parse =TRUE)
+fig_VcommDX_f <- file.path(outdir, "IC3vVcommDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VcommDX_f, type="png", bg="white")
+fig_VcommDX
+dev.off()
+#ggsave(fig_VcommDX_f, fig_VcommDX, dpi=300, width=7, height = 7, units = "cm")
+
+## Compile all IC3 plots into one plot
+fig_Vine <- plot_grid(fig_VcompositeDX, fig_VsocialDX, fig_VdailyDX, fig_VcommDX, ncol = 2)
+fig_Vine_f <- file.path(outdir, "IC3vVall.png")
+Cairo(width=18, height = 18, units = "cm", dpi=300, file=fig_Vine_f, type="png", bg="white")
+fig_Vine
+dev.off()
+
+
+##################### 
+
+# ##IC62 diagnosis 
+dxP <- "italic(p)[adj] == 0.02"
+fig_dx_site <- raw %>%
+  ggplot( aes(x=site, y=IC62, fill=diagnosis)) +
+   geom_split_violin() + geom_boxplot(width=0.2, outlier.size=0.4) +
+  ylim(-5,5) +
+  theme(panel.background=element_blank(),legend.title=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =9), axis.title.x = element_blank(),
+      axis.ticks = element_blank(), axis.text = element_text(size = 30),
+      axis.title = element_text(size=50, face="bold"),
+      legend.key.size = unit(0.7, "cm")) + ylab("IC62 subject course") +
+      scale_fill_manual(values =c("#FFFFFF","#999999"), labels = c("Autistic", "Non-Autistic")) +
+      annotate(geom="text", x=1, y=5, size=4, label = dxP, parse =TRUE) 
+  #facet_wrap(~site, ncol=5)
+fig_dx_site
+fig_dx_site_f <- file.path(outdir, "IC62vdxSite.png")
+ggsave(fig_dx_site_f, fig_dx_site, dpi=300, width=12, height = 7, units = "cm")
+
+# ##IC42 diagnosis 
+dxP1 <- ("italic(p)[unadj] == 0.0007")
+dxP2 <- ("italic(p)[adj] == 0.054")
+fig_dx_site <- raw %>%
+  ggplot( aes(x=site, y=IC42, fill=diagnosis)) +
+   geom_split_violin() + geom_boxplot(width=0.2, outlier.size=0.4) +
+  ylim(-5,5) +
+  theme(panel.background=element_blank(),legend.title=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =9), axis.title.x = element_blank(),
+      axis.ticks = element_blank(), axis.text = element_text(size = 30),
+      axis.title = element_text(size=50, face="bold"),
+      legend.key.size = unit(0.7, "cm")) + ylab("IC42 subject course") +
+      scale_fill_manual(values =c("#FFFFFF","#999999"), labels = c("Autistic", "Non-Autistic")) +
+      annotate(geom="text", x=1.1, y=5, size=4, label = dxP1, parse =TRUE) +
+        annotate(geom="text", x=0.95, y=4, size=4, label = dxP2, parse =TRUE)
+  #facet_wrap(~site, ncol=5)
+      options(scipen = 999)
+fig_dx_site
+fig_dx_site_f <- file.path(outdir, "IC42vdxSite.png")
+ggsave(fig_dx_site_f, fig_dx_site, dpi=300, width=12, height = 7, units = "cm")
+
+
+```
+
+```{r}
+##IC70
+
+#######       IC70 by vineland by group 
+
+##IC70 - ADOS total
+ADOStotalP = "italic(p)[unadj] == 0.004"
+fig_ADOStotal <- raw  %>%
+  filter(! is.na(css_total), diagnosis=="ASD") %>%
+    ggplot( aes(x=css_total, y=IC70)) + ylim(-5,5) + xlim(1,10) +
+      xlab("ADOS total") + geom_point(size=0.4) +
+     geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC70 subject course") +
+    annotate(geom="text", x=2.5, y=5.0, size=3.5, label = ADOStotalP, parse =TRUE)
+fig_ADOStotal_f <- file.path(outdir, "IC70vADOStotal.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_ADOStotal_f, type="png", bg="white")
+fig_ADOStotal
+dev.off()
+#ggsave(fig_ADOStotal_f, fig_ADOStotal, dpi=300, width=7, height = 7, units = "cm")
+
+##IC70 - ADOS social
+ADOSsocialP = "italic(p)[unadj] == 0.007"
+fig_ADOSsocial <- raw  %>%
+  filter(! is.na(sa_css), diagnosis=="ASD") %>%
+    ggplot( aes(x=sa_css, y=IC70)) + ylim(-5,5) + xlim(1,10) +
+      xlab("ADOS social affect") + geom_point(size=0.4) +
+     geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC70 subject course") +
+    annotate(geom="text", x=2.5, y=5.0, size=3.5, label = ADOSsocialP, parse =TRUE)
+fig_ADOSsocial_f <- file.path(outdir, "IC70vADOSsocial.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_ADOSsocial_f, type="png", bg="white")
+fig_ADOSsocial
+dev.off()
+#ggsave(fig_ADOSsocial_f, fig_ADOSsocial, dpi=300, width=7, height = 7, units = "cm")
+
+##IC70 - composite
+VcompositeP = "italic(p)[unadj] == 0.001"
+fig_VcompositeDX <- raw  %>%
+  filter(! is.na(vabsabcabc_standard), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsabcabc_standard, y=IC70)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland composite") + geom_point(size=0.4) +
+    geom_ribbon(stat='smooth', method = "lm", se=TRUE, alpha=0.3, 
+              aes(color = NULL, group = factor(diagnosis))) +
+  geom_line(stat='smooth', method = "lm", alpha=1.0) +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC70 subject course") +
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VcompositeP, parse =TRUE)
+fig_VcompositeDX_f <- file.path(outdir, "IC70vVcompositeDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VcompositeDX_f, type="png", bg="white")
+fig_VcompositeDX
+dev.off()
+#ggsave(fig_VcompositeDX_f, fig_VcompositeDX, dpi=300, width=7, height = 7, units = "cm")
+
+##IC70 - daily 
+VdailyP = "italic(p)[unadj] == 0.001"
+fig_VdailyDX <- raw  %>%
+  filter(! is.na(vabsdscoresd_dss), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsdscoresd_dss, y=IC70)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland daily living") + geom_point(size=0.4) +
+     stat_smooth(method="lm", se = TRUE, size=0.5, colour= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC70 subject course")+
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VdailyP, parse =TRUE)
+fig_VdailyDX_f <- file.path(outdir, "IC70vVdailyDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VdailyDX_f, type="png", bg="white")
+fig_VdailyDX
+dev.off()
+#ggsave(fig_VdailyDX_f, fig_VdailyDX, dpi=300, width=7, height = 7, units = "cm")
+
+##IC70 - socialisation 
+VsocialP = "italic(p)[unadj] == 0.003"
+fig_VsocialDX <- raw  %>%
+  filter(! is.na(vabsdscoress_dss), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsdscoress_dss, y=IC70)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland socialisation") + geom_point( size=0.4) +
+     stat_smooth(method="lm", se = TRUE, size=0.5, colour= "black") +
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold"),
+       legend.position = "none") + ylab("IC70 subject course")+
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VdailyP, parse =TRUE)
+fig_VsocialDX_f <- file.path(outdir, "IC70vVsocialDX.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VsocialDX_f, type="png", bg="white")
+fig_VsocialDX
+dev.off()
+#ggsave(fig_VsocialDX_f, fig_VsocialDX, dpi=300, width=7, height = 7, units = "cm")
+
+##IC70 - communication 
+VcommP <- "italic(p)[unadj] == 0.005"
+fig_VcommDX <- raw  %>% 
+  filter(! is.na(vabsdscoresc_dss ), diagnosis=="ASD") %>%
+    ggplot( aes(x=vabsdscoresc_dss , y=IC70)) + ylim(-3,3) + xlim(25,130) +
+      xlab("Vineland communication") + geom_point(size=0.4) +
+     stat_smooth(method="lm", se = TRUE, size=0.5, color= "black")+
+   theme(panel.background=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+         text=element_text(family="Arial", size =9),
+       axis.ticks = element_blank(), axis.text = element_text(size = 15), 
+       axis.title = element_text(size=15, face="bold") ,
+       legend.position = "right", legend.key.size = unit(0.5, "cm"),
+       legend.title = element_blank()) + ylab("IC70 subject course") +
+    annotate(geom="text", x=40, y=3.0, size=3.5, label = VcommP, parse =TRUE)
+fig_VcommDX_f <- file.path(outdir, "IC70vVcomm.png")
+Cairo(width=9, height = 9, units = "cm", dpi=300, file=fig_VcommDX_f, type="png", bg="white")
+fig_VcommDX
+dev.off()
+#ggsave(fig_VcommDX_f, fig_VcommDX, dpi=300, width=7, height = 7, units = "cm")
+
+fig_IC70all <- plot_grid(fig_ADOStotal, fig_ADOSsocial, fig_VcompositeDX, fig_VdailyDX, fig_VsocialDX, fig_VcommDX, ncol = 3, align='hv')
+fig_IC70_f <- file.path(outdir, "IC70vAll.png")
+Cairo(width=30, height = 20, units = "cm", dpi=300, file=fig_IC70_f, type="png", bg="white")
+fig_IC70all
+dev.off()
+#ggsave(fig_IC70_f, fig_IC70all, dpi=300, width=21, height = 14, units = "cm")
+
+```
+
+```{r}
+##IC20 congrads only - diagnosis
+
+dxP <- "italic(p)[adj] == 0.03"
+fig_dx_site <- raw %>%
+  ggplot( aes(x=site, y=IC20, fill=diagnosis)) +
+   geom_split_violin() + geom_boxplot(width=0.2, outlier.size=0.4) +
+  ylim(-5,5) +
+  theme(panel.background=element_blank(),legend.title=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =9), axis.title.x = element_blank(),
+      axis.ticks = element_blank(), axis.text = element_text(size = 30),
+      axis.title = element_text(size=50, face="bold"),
+      legend.key.size = unit(0.7, "cm")) + ylab("IC20 subject course") +
+      scale_fill_manual(values =c("#FFFFFF","#999999"), labels = c("Autistic", "Non-Autistic")) +
+      annotate(geom="text", x=1, y=5, size=4, label = dxP, parse =TRUE)
+  #facet_wrap(~site, ncol=5)
+fig_dx_site
+fig_dx_site_f <- file.path(outdir, "IC20vdxSite.png")
+ggsave(fig_dx_site_f, fig_dx_site, dpi=300, width=12, height = 7, units = "cm")
+
+##IC55 congrads only - diagnosis
+
+dxP <- "italic(p)[adj] == 0.03"
+fig_dx_site <- raw %>%
+  ggplot( aes(x=site, y=IC55, fill=diagnosis)) +
+   geom_split_violin() + geom_boxplot(width=0.2, outlier.size=0.4) +
+  ylim(-5,5) +
+  theme(panel.background=element_blank(),legend.title=element_blank(), panel.grid = element_blank(), axis.line=element_line(),
+        text=element_text(family="Arial", size =9), axis.title.x = element_blank(),
+      axis.ticks = element_blank(), axis.text = element_text(size = 30),
+      axis.title = element_text(size=50, face="bold"),
+      legend.key.size = unit(0.7, "cm")) + ylab("IC55 subject course") +
+      scale_fill_manual(values =c("#FFFFFF","#999999"), labels = c("Autistic", "Non-Autistic")) +
+      annotate(geom="text", x=1, y=5, size=4, label = dxP, parse =TRUE)
+  #facet_wrap(~site, ncol=5)
+fig_dx_site
+fig_dx_site_f <- file.path(outdir, "IC55vdxSite.png")
+ggsave(fig_dx_site_f, fig_dx_site, dpi=300, width=12, height = 7, units = "cm")
+
+
+```

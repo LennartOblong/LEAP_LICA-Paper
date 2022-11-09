@@ -1,0 +1,63 @@
+---
+title: "LICA_exploration"
+author: "NF"
+date: "February 21, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/project/3022035.03/LEAP_long/stats/VBM_DWI_congrads") ######### Always check this #############
+library(tidyverse)
+library(knitr)
+library(oro.nifti)
+library(patchwork)
+library(magrittr)
+library(wiqid)
+library(cowplot)
+
+source("/project/3022035.03/congratICA/R/LICA_figures.R")
+```
+
+
+```{r VBM ICs from Ting's ICA}
+
+fIC10 <- paste0("/project/3022035.03/Ting_VBM_ICA/modelOrder_100/IC10_2mm.nii.gz") 
+IC10 <- readNIfTI(fIC10)
+
+
+fIC14 <- paste0("/project/3022035.03/Ting_VBM_ICA/modelOrder_100/IC14_2mm.nii.gz") 
+IC14 <- readNIfTI(fIC14)
+
+```
+
+```{r}
+fVBM <- paste0("/project/3022035.03/LEAP_long/data/flica_output/VBM_DWI_congrads/niftiOut_mi3.nii.gz") 
+VBM <- readNIfTI(fVBM)
+```
+
+```{r}
+Rs10 <- c()
+for (i in 1:80) {
+  VBMn <- VBM@.Data[,,,i]
+  R <- cor(IC10, VBMn)
+  Rs10[i] <- R
+}
+
+Rs14 <- c()
+for (i in 1:80) {
+  VBMn <- VBM@.Data[,,,i]
+  R <- cor(IC14, VBMn)
+  Rs14[i] <- R
+}
+
+Rs <- data.frame("IC10" = Rs10, "IC14"=Rs14, "ICs" = paste0("IC", 1:80))
+
+Rs %>% arrange(desc(abs(IC10))) %>% head()
+Rs %>% arrange(desc(abs(IC14))) %>% head()
+```
+
+```{r}
+
+```
+

@@ -1,0 +1,129 @@
+---
+  title: "LEAP2 demographics"
+author: "Nat Forde"
+date: "June 9, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(readxl)
+
+
+outdir <- "/project/3022035.03/LEAP_long/stats"
+
+```
+
+```{r load}
+behaviour <- read_xlsx("/project/3022035.03/LEAP/clinical/LEAP_t1_t2_Core clinical variables_03-09-19-withlabels.xlsx")
+behaviour[behaviour == 999] <- NA
+behaviour[behaviour == 777] <- NA
+
+beh1 <- behaviour %>% dplyr::select("subjects", starts_with("t1_"))
+
+colnames(beh1) <- sub("t1_","",colnames(beh1))
+beh1$timepoint <- "t1"
+
+beh2 <- behaviour %>% dplyr::select("subjects", starts_with("t2_"))
+
+colnames(beh2) <- sub("t2_","",colnames(beh2))
+beh2$timepoint <- "t2"
+
+beh1 <- beh1[,c("subjects","diagnosis", "group",  "sex", "site", "age", "ageyrs", "fsiq", "adi_rrb_total", "adi_communication_total", "adi_social_total", "rrb_css_all", "sa_css_all", "srs_tscore_combined", "ssp_total", "rbs_total", "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint")]
+
+beh2 <- beh2[,c("subjects",  "sex", "site", "age", "ageyrs", "srs_tscore_combined", "ssp_total", "rbs_total", "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint")]
+
+selected_columns <- beh1[,c('subjects','fsiq','diagnosis', 'group', 'adi_rrb_total', 'adi_communication_total',  'adi_social_total', 'rrb_css_all', 'sa_css_all')]
+
+beh2 <- merge(beh2, selected_columns, by.x = "subjects", all=TRUE) #diagnosis", "group",  "sex", "site", "age", "ageyrs", "fsiq", "adi_rrb_total", "adi_communication_total", "adi_social_total", "rrb_css_all", "sa_css_all", "srs_tscore_combined", "ssp_total", "rbs_total", "vabsdscoresc_dss", "vabsdscoresd_dss", "vabsdscoress_dss", "vabsabcabc_standard","timepoint"))
+
+### Timepoint 2 clinical core date does NOT contain the following: `adi_rrb_total`, `adi_communication_total`, `adi_social_total`, `rrb_css_all`, `sa_css_all`, 'group', 'diagnosis' -> thus, these where taken from the Timepoint 1 data and appended! ###
+
+subs1 <- read.table("/project/3022035.03/LEAP/clinical/final_overlapping_subs.txt", colClasses = "numeric")  %>% unlist() %>% unname()
+
+subs2 <- read.table("/project/3022035.03/LEAP2/data/final_overlapping_subs.txt", colClasses = "numeric") %>% unlist() %>% unname()
+
+beh1 <- filter(beh1, subjects %in% subs1)
+beh2 <- filter(beh2, subjects %in% subs2)
+
+useable <- rbind(beh1, beh2)
+
+```
+
+```{r basic demogs & table 1}
+noreps <- distinct(useable, subjects, .keep_all = TRUE)
+nsubs <- nrow(noreps)
+subs_indiv <- noreps %>% dplyr::select(subjects)
+sub_ls_norep.f <- paste0("/project/3022035.03/LEAP_long/data/VBM/indiv_subs_n",nsubs,".txt")
+write.table(subs_indiv, file= sub_ls_norep.f, row.names = FALSE, col.names = FALSE)
+
+reps <- anti_join(useable, noreps)
+
+subs_LEAP2_only <- subs2 [ ! subs2 %in% subs1]
+sub_ls_LEAP2_only.f <- "/project/3022035.03/LEAP_long/data/VBM/LEAP2_only_subs.txt"
+write.table(subs_LEAP2_only, file= sub_ls_LEAP2_only.f, row.names = FALSE, col.names = FALSE)
+
+#age
+bartlett.test(noreps$ageyrs ~ noreps$diagnosis) 
+shapiro.test(noreps$ageyrs)
+kruskal.test(noreps$diagnosis, noreps$ageyrs)
+kruskal.test(reps$diagnosis, reps$ageyrs)
+
+#sex
+chisq.test(noreps$diagnosis, noreps$sex)
+chisq.test(reps$diagnosis, reps$sex)
+#timepoint
+chisq.test(noreps$diagnosis, noreps$timepoint)
+
+#site
+chisq.test(noreps$diagnosis, noreps$site)
+chisq.test(reps$diagnosis, reps$site)
+
+#iq
+kruskal.test(noreps$diagnosis, noreps$fsiq)
+kruskal.test(reps$diagnosis, reps$fsiq)
+
+table(noreps$diagnosis, noreps$timepoint)
+table(reps$diagnosis, reps$site)
+
+
+tbl <- noreps %>% group_by(diagnosis, site) %>%
+  summarise(n = sum(!is.na(ageyrs)),
+            n_Male = sum(sex == "Male"),
+            n_Female = sum(sex == "Female"),
+            mean_age = round(mean(ageyrs, na.rm=T),2),
+            sd_age = round(sd(ageyrs, na.rm =T),2),
+            mean_IQ = round(mean(fsiq, na.rm =T),2),
+            sd_IQ = round(sd(fsiq, na.rm =T),2))
+kable(tbl, digits = 2)
+demog_table.file <- file.path(outdir, "demog_norep_tbl.csv")
+write.csv(tbl, demog_table.file, row.names = F)
+
+tbl2 <- reps %>% group_by(diagnosis) %>%
+  summarise(n = sum(!is.na(ageyrs)),
+            n_Male = sum(sex == "Male"),
+            n_Female = sum(sex == "Female"),
+            mean_age = round(mean(ageyrs, na.rm=T),2),
+            sd_age = round(sd(ageyrs, na.rm =T),2),
+            mean_IQ = round(mean(fsiq, na.rm =T),2),
+            sd_IQ = round(sd(fsiq, na.rm =T),2))
+kable(tbl2, digits = 2)
+demog_table.file2 <- file.path(outdir, "demog_rep_tbl.csv")
+write.csv(tbl2, demog_table.file2, row.names = F)
+
+#table by site
+tbl2 <- noreps %>% group_by(site, diagnosis) %>%
+  summarise(n = sum(!is.na(ageyrs)),
+            n_Male = sum(sex == "Male"),
+            n_Female = sum(sex == "Female"),
+            mean_age = round(mean(ageyrs, na.rm=T),2),
+            sd_age = round(sd(ageyrs, na.rm =T),2),
+            mean_IQ = round(mean(fsiq, na.rm =T),2),
+            sd_IQ = round(sd(fsiq, na.rm =T),2))
+kable(tbl2, digits = 2)
+demog_table2.file <- file.path(outdir, "demog_tblXsite.csv")
+write.csv(tbl2, demog_table2.file, row.names = F)
+
+```

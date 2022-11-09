@@ -1,0 +1,11 @@
+### Lennart Oblong 26.09.2022 ###
+
+#First run the get_ script multiple times to extract the scans into a seperate directory. Run for each subject list and wave so as to not replace scans of subjects that have scans at both timepoints 
+# After merging the timepoint specific scans we can average across time (-Tmean) to obtain the average of all volumes for ASD and Control seperately.
+
+### Commands ###
+
+# To merge apply [fslmerge -t <output_file> *G2.nii.gz] within the desired directory. Output file can specify a new directory, thus the file can be placed where need be. Merge ASD and CTRL files again across timepoints.
+# To calculate the average run [fslmaths <output_file> -Tmean <input_file>] in the command line
+
+### for more info about fsl functions look at https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FSL%20FAQ
